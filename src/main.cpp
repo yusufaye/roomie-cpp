@@ -1,35 +1,39 @@
-#include "models/model.hpp"
-
-void infer(Model& model) {
-  while (true)
-  {
-    at::Tensor output = model.forward();
-  }
-  
-  // std::cout << output << std::endl;
-}
+#include "network/message.h"
+#include "network/websocket.h"
+#include "utils/profiler.h"
 
 int main(int argc, char const *argv[])
 {
-    // Create input tensor
-  torch::Tensor input_tensor = torch::rand({1, 5});
+  vector<NcuKernel> kernels = get_profiled_data("alexnet");
+  cout << "Total kernels: " << kernels.size() << endl;
+  return 0;
+}
 
-  // Create multiple models
-  Model models[5];
-  for (int i = 0; i < 5; i++) {
-    models[i] = Model("resnet");
+void run_server()
+{
+  WebSocketServer server("");
+  server.run();
+}
+
+int networking(int argc, char const *argv[])
+{
+  std::thread server_thread(run_server);
+
+  server_thread.detach();
+
+  WebSocketClient client("ws://localhost:9002");
+  std::thread client_thread([&client]
+                            { client.run(); });
+  // Wait for the connection to be established
+  while (!client.is_connected())
+  {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  // Create threads to perform inference in parallel
-  std::thread threads[5];
-  for (int i = 0; i < 5; i++) {
-    threads[i] = std::thread(infer, std::ref(models[i]));
-  }
-
-  // Wait for all threads to finish
-  for (int i = 0; i < 5; i++) {
-    threads[i].join();
-  }
+  Message message("hello", "world");
+  for (int i; i < 10; i++)
+    client.send(message);
+  client_thread.join();
 
   return 0;
 }

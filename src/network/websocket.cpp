@@ -1,69 +1,104 @@
 // client.cpp
+#include <websocketpp/config/asio_no_tls_client.hpp>
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/client.hpp>
 #include <websocketpp/server.hpp>
-#include "message.h"
+#include "websocket.h"
 
 typedef websocketpp::client<websocketpp::config::asio> client;
 typedef websocketpp::server<websocketpp::config::asio> server;
+typedef websocketpp::config::asio_client::message_type::ptr message_ptr_c;
 
-class WebSocketClient
+WebSocketClient::WebSocketClient(const std::string url) : client_(), url_(url)
 {
-public:
-  WebSocketClient() : client_()
+  // "ws://localhost:9002"
+  try
   {
+    // Set logging to be pretty verbose (everything except message payloads)
+    client_.set_access_channels(websocketpp::log::alevel::all);
+    client_.clear_access_channels(websocketpp::log::alevel::frame_payload);
+
+    // Initialize ASIO
     client_.init_asio();
+    client_.set_open_handler([this](websocketpp::connection_hdl hdl)
+                             {
+                    
+        hdl_ = hdl;
+        connected_ = true;
+        std::cout << "Connected successfully!" << std::endl; });
     client_.set_message_handler([this](websocketpp::connection_hdl hdl, client::message_ptr msg)
                                 {
                                   Message message(msg->get_payload());
-                                  std::cout << "Received message: " << message.toString() << std::endl;
+                                  std::cout << "[Client] Received message: < " << message.toString() << " >" << std::endl;
                                   // Handle message
                                 });
+
+    websocketpp::lib::error_code ec;
+    client::connection_ptr con = client_.get_connection(url, ec);
+    if (ec)
+    {
+      std::cout << "could not create connection because: " << ec.message() << std::endl;
+      exit(1);
+    }
+
+    // Note that connect here only requests a connection. No network messages are
+    // exchanged until the event loop starts running in the next line.
+    client_.connect(con);
+
+    // Start the ASIO io_service run loop
+    // this will cause a single connection to be made to the server. client_.run()
   }
-
-  // void connect(const std::string &uri)
-  // {
-  //   client_.connect(uri);
-  // }
-
-  // void send_message(const Message &message)
-  // {
-  //   client_.send(message.toString());
-  // }
-
-  void run()
+  catch (websocketpp::exception const &e)
   {
-    client_.run();
+    std::cout << e.what() << std::endl;
   }
+}
 
-private:
-  client client_;
-};
-
-
-class WebSocketServer
+void WebSocketClient::send(Message &message)
 {
-public:
-  WebSocketServer() : server_()
+  std::string payload = message.toString();
+  websocketpp::frame::opcode::value op = websocketpp::frame::opcode::text;
+  websocketpp::lib::error_code ec;
+  client_.send(hdl_, payload, op, ec);
+  if (ec)
   {
-    server_.init_asio();
-    server_.set_reuse_addr(true);
-    server_.listen(9002);
-    server_.start_accept();
+    std::cerr << "Error sending message: " << ec.message() << std::endl;
   }
+}
 
-  void run()
-  {
-    server_.run();
-  }
+void WebSocketClient::run()
+{
+  // will exit when this connection is closed.
+  client_.run();
+}
 
-  void on_message(websocketpp::connection_hdl hdl, server::message_ptr msg)
-  {
-    Message message(msg->get_payload());
-    std::cout << "Received message: " << message.toString() << std::endl;
-    // Handle message
-  }
+bool WebSocketClient::is_connected() {
+  return connected_;
+}
 
-private:
-  server server_;
-};
+WebSocketServer::WebSocketServer(const std::string url) : server_(), url_(url)
+{
+  // Set logging settings
+  server_.set_access_channels(websocketpp::log::alevel::all);
+  server_.clear_access_channels(websocketpp::log::alevel::frame_payload);
+
+  // Initialize Asio
+  server_.init_asio();
+  server_.set_message_handler([this](websocketpp::connection_hdl hdl, server::message_ptr msg)
+                              {
+                                Message message(msg->get_payload());
+                                std::cout << "[Server] Received message: < " << message.toString() << " >" << std::endl;
+                                // Handle message
+                              });
+
+  // Listen on port 9002
+  server_.listen(9002);
+
+  // Start the server accept loop
+  server_.start_accept();
+}
+
+void WebSocketServer::run()
+{
+  server_.run();
+}

@@ -4,11 +4,12 @@
 
 #include <string>
 
-class Message {
+class Message
+{
 public:
-    Message(const std::string& data)
+    Message(const std::string &data)
         : data_(data) {}
-    Message(const std::string& type, const std::string& data)
+    Message(const std::string &type, const std::string &data)
         : type_(type), data_(data) {}
 
     std::string getType() const { return type_; }
@@ -21,4 +22,4 @@ private:
     std::string data_;
 };
 
-#endif  // MESSAGE_H
+#endif // MESSAGE_H
