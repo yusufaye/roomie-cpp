@@ -1,3 +1,7 @@
+#ifndef OCCUPANCY_H
+#define OCCUPANCY_H
+
+
 #include <map>
 #include <math.h>
 #include "csv.hpp"
@@ -221,3 +225,6 @@ public:
     return perf;
   }
 };
+
+
+#endif  // OCCUPANCY_H

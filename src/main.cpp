@@ -1,11 +1,16 @@
+#include "utils/profiler.h"
+#include "utils/datastore.h"
 #include "network/message.h"
 #include "network/websocket.h"
-#include "utils/profiler.h"
 
 int main(int argc, char const *argv[])
 {
-  vector<NcuKernel> kernels = get_profiled_data("alexnet");
-  cout << "Total kernels: " << kernels.size() << endl;
+  Model model(0, "alexnet", "xavier");
+  pre_profiled(model);
+  model.batch_size = 64;
+  for(auto &it: *model.get_Kernel()) {
+    cout << "Total kernels: " << it.first << " : " << it.second.size() << endl;
+  }
   return 0;
 }
 

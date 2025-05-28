@@ -85,6 +85,16 @@
     "__nullptr": "cpp",
     "format": "cpp",
     "pointers": "cpp",
-    "__locale": "cpp"
+    "__locale": "cpp",
+    "filesystem": "cpp",
+    "multi_span": "cpp",
+    "__functional_base": "cpp",
+    "locale": "cpp",
+    "__bit_reference": "cpp",
+    "__hash_table": "cpp",
+    "__string": "cpp",
+    "__tree": "cpp",
+    "queue": "cpp",
+    "stack": "cpp"
   }
 }

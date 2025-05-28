@@ -1,3 +1,6 @@
+#ifndef KERNELS_H
+#define KERNELS_H
+
 #include <iostream>
 #include <map>
 #include <string>
@@ -44,7 +47,7 @@ public:
   }
 };
 
-class Operation : NcuKernel
+class Operation : public NcuKernel
 {
 private:
   Perf perf_;
@@ -125,3 +128,5 @@ public:
     xxx_additional_duration = 0.0;    // additional duration
   }
 };
+
+#endif  // KERNELS_H
