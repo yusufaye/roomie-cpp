@@ -4,7 +4,7 @@
 
 #include <map>
 #include <math.h>
-#include "csv.hpp"
+#include "csv.h"
 
 using namespace std;
 
@@ -58,24 +58,24 @@ public:
   {
     string computeCapability = major + "." + minor;
     string pathname = "/home/yusufaye/roomie-cpp/src/data/gpu/gpu-configs.csv";
-    csv::CSVReader reader(pathname);
-    for (csv::CSVRow& row : reader)
-    {
-      if (row["compute_capability"].get<string>() == computeCapability)
-      {
-        threadsPerWarp = row["threadsPerWarp"].get<int>();
-        warpsPerMultiprocessor = row["warpsPerMultiprocessor"].get<int>();
-        threadBlocksPerMultiprocessor = row["threadBlocksPerMultiprocessor"].get<int>();
-        sharedMemoryPerMultiprocessor = row["sharedMemoryPerMultiprocessor"].get<int>();
-        registerFileSize = row["registerFileSize"].get<int>();
-        registerAllocationUnitSize = row["registerAllocationUnitSize"].get<int>();
-        maxRegsPerThread = row["maxRegsPerThread"].get<int>();
-        maxRegsPerBlock = row["maxRegsPerBlock"].get<int>();
-        sharedMemoryAllocationUnitSize = row["sharedMemoryAllocationUnitSize"].get<int>();
-        warpAllocationGranularity = row["warpAllocationGranularity"].get<int>();
-        break;
-      }
-    }
+    // csv::CSVReader reader(pathname);
+    // for (csv::CSVRow& row : reader)
+    // {
+    //   if (row["compute_capability"].get<string>() == computeCapability)
+    //   {
+    //     threadsPerWarp = row["threadsPerWarp"].get<int>();
+    //     warpsPerMultiprocessor = row["warpsPerMultiprocessor"].get<int>();
+    //     threadBlocksPerMultiprocessor = row["threadBlocksPerMultiprocessor"].get<int>();
+    //     sharedMemoryPerMultiprocessor = row["sharedMemoryPerMultiprocessor"].get<int>();
+    //     registerFileSize = row["registerFileSize"].get<int>();
+    //     registerAllocationUnitSize = row["registerAllocationUnitSize"].get<int>();
+    //     maxRegsPerThread = row["maxRegsPerThread"].get<int>();
+    //     maxRegsPerBlock = row["maxRegsPerBlock"].get<int>();
+    //     sharedMemoryAllocationUnitSize = row["sharedMemoryAllocationUnitSize"].get<int>();
+    //     warpAllocationGranularity = row["warpAllocationGranularity"].get<int>();
+    //     break;
+    //   }
+    // }
   }
 
   std::array<int, 3> boundaries()
@@ -135,7 +135,7 @@ public:
 
     perf.resource_required_per_block["warps_per_block"] = warpsPerBlock;
     if (verbose)
-      cout << "\tWarps per block: " << warpsPerBlock << endl;
+      std::cout << "\tWarps per block: " << warpsPerBlock << std::endl;
 
     //
     // Limitation due to Warps
@@ -147,13 +147,13 @@ public:
     // ##
     // # Limitation due to Registers
     if (verbose)
-      cout << "Maximum block due to registers" << endl;
+      std::cout << "Maximum block due to registers" << std::endl;
 
     int maxBlocksDueToRegs(0);
     if (regsPerThread > maxRegsPerThread)
     {
       if (verbose)
-        cout << "\t\u274CError kernel launch" << endl;
+        std::cout << "\t\u274CError kernel launch" << std::endl;
       maxBlocksDueToRegs = 0;
     }
     else
@@ -161,14 +161,14 @@ public:
       // # the number of register per warp rounder up to the register allocation unit size
       int regsPerWarp = Ceil(regsPerThread * threadsPerWarp, registerAllocationUnitSize);
       if (verbose)
-        cout << "\tRegister per warp: " << regsPerWarp << endl;
+        std::cout << "\tRegister per warp: " << regsPerWarp << std::endl;
 
       // # register per block
       int regsPerBlock = regsPerWarp * warpsPerBlock;
 
       perf.resource_required_per_block["regs_per_block"] = regsPerBlock;
       if (verbose)
-        cout << "\tRegister per block: " << regsPerBlock << endl;
+        std::cout << "\tRegister per block: " << regsPerBlock << std::endl;
 
       if (regsPerThread > 0)
       {
@@ -177,7 +177,7 @@ public:
             maxRegsPerBlock / regsPerWarp, // # maximum warps per block with respect to the maxmimum register allocated per block
             warpAllocationGranularity);
         if (verbose)
-          cout << "\tWarps per multiprocessor limited by registers: " << warpsPerMultiprocessorLimitedByRegisters << endl;
+          std::cout << "\tWarps per multiprocessor limited by registers: " << warpsPerMultiprocessorLimitedByRegisters << std::endl;
         // # The number of blocks limited by registers per warps times the factor of the maximum register that a block can use.
         // #  - for instance if a block can use at most half of the total register file, so we will have twice as much block,
         // #  - however, if a block can use up to the value of the register file, so the line is ignored.
@@ -188,7 +188,7 @@ public:
     }
 
     if (verbose)
-      cout << "\t\u274E Max blocks due to registers: " << maxBlocksDueToRegs << endl;
+      std::cout << "\t\u274E Max blocks due to registers: " << maxBlocksDueToRegs << std::endl;
 
     // ##
     // # Limitation due to Shared Memory
@@ -204,7 +204,7 @@ public:
     int maxBlocks[3] = {maxBlocksDueToWarps, maxBlocksDueToRegs, maxBlocksDueToSMEM};
     int argmin = Argmin(maxBlocks, 3);
     if (verbose)
-      cout << "Max Blocks Due To Warps: " << maxBlocksDueToWarps << "\nMax Blocks Due To Regs: " << maxBlocksDueToRegs << "\nMax Blocks Due To SMEM: " << maxBlocksDueToSMEM << endl;
+      std::cout << "Max Blocks Due To Warps: " << maxBlocksDueToWarps << "\nMax Blocks Due To Regs: " << maxBlocksDueToRegs << "\nMax Blocks Due To SMEM: " << maxBlocksDueToSMEM << std::endl;
 
     int blocksPerSM = maxBlocks[argmin];
 
@@ -213,7 +213,7 @@ public:
     float theoretical_occupancy = active_warps_per_SM / warpsPerMultiprocessor;
 
     if (verbose)
-      cout << "Limited by " << limitedby[argmin] << ", theoretical_occupancy: " << theoretical_occupancy << endl;
+      std::cout << "Limited by " << limitedby[argmin] << ", theoretical_occupancy: " << theoretical_occupancy << std::endl;
 
     perf.occupancy = theoretical_occupancy;
     perf.max_blocks = blocksPerSM;

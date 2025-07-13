@@ -10,8 +10,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <unordered_map>
-#include "csv.hpp"
 #include "engine.h"
+#include "utils/csv.h"
 #include "networking/port.h"
 #include "networking/message.h"
 
@@ -86,14 +86,12 @@ private:
     std::unordered_map<int, std::vector<double>> data;
     try
     {
+      io::CSVReader<2> in(filepath);
+      in.read_header(io::ignore_extra_column, "timestamp", "model");
       float timestamp;
       int idx;
-      csv::CSVReader reader(filepath);
-      for (csv::CSVRow &row : reader)
+      while (in.read_row(timestamp, idx))
       {
-        // model,timestamp
-        timestamp = row["timestamp"].get<float>();
-        idx = row["model"].get<int>();
         if (timestamp <= duration_)
         {
           data[idx].push_back(timestamp);
