@@ -14,10 +14,9 @@ protected:
 
 public:
   Scheduler() {}
-
-  virtual std::pair<Model *, Worker *> schedule(std::vector<Worker *> workers, std::vector<std::string> variant_candidates) = 0;
+  virtual std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates) = 0;
   
-  Model* get_model(string hardware_platform, string variant_name) {
+  Model* load_model_metadata(string hardware_platform, string variant_name) {
     std::string key = hardware_platform + "_" + variant_name;
     auto it = cache.find(key);
     if (it != cache.end())

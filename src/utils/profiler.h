@@ -30,7 +30,7 @@ double convert(const std::string &v)
     }
     catch (const std::invalid_argument &e)
     {
-        std::cerr << "Error: Invalid number format: " << v << std::endl;
+        std::cerr << "⛔️Error: Invalid number format: " << v << std::endl;
         return 0.0; // Handle invalid cases
     }
 }
@@ -39,7 +39,8 @@ double convert(const std::string &v)
 void set_profiled_kernels(std::vector<NcuKernel *> &kernels, const std::string &model_name, int batch_size, std::string data_path = "data/traces")
 {
     std::string fullpath = WORKDIR + "/" + data_path + "/nsight-compute/xavier/" + model_name + "_batch-size" + std::to_string(batch_size) + "_nsight-compute.ncu-rep.csv";
-    try {
+    try
+    {
         csv::CSVReader reader(fullpath);
         for (csv::CSVRow &row : reader)
         {
@@ -70,45 +71,61 @@ void set_profiled_kernels(std::vector<NcuKernel *> &kernels, const std::string &
             kernel.capability_major = convert(row["device__attribute_compute_capability_major"].get<string>());
             kernels.push_back(&kernel);
         }
-        cout << "[INFO] Read a total of " << kernels.size() << " kernels." << endl;
-    } catch (...) {
-        cout << "[WARN] No trace found at " << fullpath << endl;
+        // cout << "[INFO] Read a total of " << kernels.size() << " kernels." << endl;
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "⛔️No trace found at " << fullpath << "\n\t" << e.what() << '\n';
     }
 }
 
-void set_memory(map<int, int> &Memory, const std::string &variant_name, const std::string &hardware_platform, const std::string &data_path = "data/traces")
+void set_memory(map<int, unsigned long> &Memory, const std::string &variant_name, const std::string &hardware_platform, const std::string &data_path = "data/traces")
 {
-    std::string fullpath = WORKDIR + "/" + data_path + "/mem-pytorch-extracted/" + variant_name + "_mem-pytorch-extracted.csv";
-    csv::CSVReader reader(fullpath);
-    int batch_size;
-    for (csv::CSVRow &row : reader)
+    try
     {
-        batch_size = row["batch_size"].get<int>();
-        Memory[batch_size] = fmax(row["total_reserved"].get<int>(), Memory[batch_size]);
+        std::string fullpath = WORKDIR + "/" + data_path + "/mem-pytorch-extracted/" + variant_name + "_mem-pytorch-extracted.csv";
+        csv::CSVReader reader(fullpath);
+        int batch_size;
+        for (csv::CSVRow &row : reader)
+        {
+            batch_size = row["batch_size"].get<int>();
+            Memory[batch_size] = fmax(row["total_reserved"].get<unsigned long>(), Memory[batch_size]);
+        }
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "⛔️Error setting memory for " << variant_name << "\n\t" << e.what() << '\n';
     }
 }
 
 void set_throughput(map<int, float> &Throughput, const std::string &variant_name, const std::string &hardware_platform, const std::string &data_path = "data/traces")
 {
-    std::string fullpath = WORKDIR + "/" + data_path + "/inference-time/" + hardware_platform + "/" + variant_name + "-" + hardware_platform + "_inference_time.csv";
-    csv::CSVReader reader(fullpath);
-    int batch_size;
-    map<int, std::vector<float>> inference_time;
-    for (csv::CSVRow &row : reader)
+    try
     {
-        batch_size = row["batch_size"].get<int>();
-        inference_time[batch_size].push_back(row["inference_time"].get<float>());
+        std::string fullpath = WORKDIR + "/" + data_path + "/inference-time/" + hardware_platform + "/" + variant_name + "-" + hardware_platform + "_inference_time.csv";
+        csv::CSVReader reader(fullpath);
+        int batch_size;
+        map<int, std::vector<float>> inference_time;
+        for (csv::CSVRow &row : reader)
+        {
+            batch_size = row["batch_size"].get<int>();
+            inference_time[batch_size].push_back(row["inference_time"].get<float>());
+        }
+        for (auto &[batch_size, elapsed] : inference_time)
+        {
+            Throughput[batch_size] = nc::NdArray(elapsed).median().item();
+        }
     }
-    nc::NdArray<float> values;
-    for (auto &it : inference_time)
+    catch (const std::exception &e)
     {
-        Throughput[batch_size] = nc::NdArray(it.second).median().item();
+        std::cerr << "⛔️Error setting throughput for " << variant_name << "\n\t" << e.what() << '\n';
     }
 }
 
 void pre_profiled(Model &model)
 {
-    for (int batch_size : BATCH_SIZES) {
+    for (int batch_size : BATCH_SIZES)
+    {
         std::vector<NcuKernel *> *kernels = &((*model.get_Kernel())[batch_size]);
         set_profiled_kernels(*kernels, model.name, batch_size);
     }

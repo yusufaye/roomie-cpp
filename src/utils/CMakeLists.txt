@@ -11,6 +11,6 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(csv)
 
 # Create library
-add_library(utils profiler.h kernels.h datastore.h general.h constants.h)
+add_library(utils profiler.h kernels.h datastore.h general.h constants.h queue.h load_balancing.h)
 target_link_libraries(utils csv)
 target_include_directories(utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -1,0 +1,16 @@
+{
+  "id": 0,
+  "host": "howsrv-3",
+  "port": 8080,
+  "type": "Controller",
+  "parameters": {
+    "scheduling": "INFaaSSchaduling",
+    "log_dir": "logger/infaas"
+  },
+  "remote_engines": [
+    {
+      "remote_host": "howsrv-3",
+      "remote_port": 9090
+    }
+  ]
+}

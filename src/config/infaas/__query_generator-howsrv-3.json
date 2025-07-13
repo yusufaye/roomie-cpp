@@ -1,0 +1,31 @@
+{
+  "id": 0,
+  "host": "howsrv-3",
+  "port": 0,
+  "type": "PoissonZipfQueryGenerator",
+  "parameters": {
+    "duration": 5.0,
+    "domain": [
+      "alexnet",
+      "squeezenet1_1",
+      "shufflenet_v2_x2_0",
+      "googlenet",
+      "resnet18",
+      "inception_v3",
+      "efficientnet_v2_l",
+      "wide_resnet101_2",
+      "convnext_base",
+      "convnext_large",
+      "fcos_resnet50_fpn",
+      "fasterrcnn_resnet50_fpn"
+    ],
+    "qps": 1000,
+    "path": "/home/yusufaye/roomie-cpp/src/data/synthetic-data/synthetic-data_qps1000_achieved-qps9831_jetson_agx_xavier.csv"
+  },
+  "remote_engines": [
+    {
+      "remote_host": "howsrv-3",
+      "remote_port": 8080
+    }
+  ]
+}
