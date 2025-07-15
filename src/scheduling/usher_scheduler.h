@@ -2,7 +2,6 @@
 #define USHER_SCHEDULER_H
 
 #include <math.h>
-#include "NumCpp.hpp"
 #include "base_scheduler.h"
 #include "utils/general.h"
 #include "utils/datastore.h"
@@ -18,10 +17,10 @@ float Creq(Model &variant)
 {
   // Creq of a model is the HIGHEST PERCENTAGE of the total computation space of a GPU consumed by the model at any point during its execution.
 
-  std::vector<float> achieved_occupancy;
+  float total = 0.0;
   for (auto &it : variant.get_kernels())
-    achieved_occupancy.push_back(it->achieved_occupancy);
-  return nc::mean(nc::NdArray(achieved_occupancy)).item(); // The highest percentage of computation.
+    total += it->achieved_occupancy;
+  return total / variant.get_kernels().size(); // The highest percentage of computation.
 }
 
 class UsherModel

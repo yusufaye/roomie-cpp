@@ -3,16 +3,14 @@
 
 // #include <format>
 #include <string>
-#include <filesystem>
 #include <iostream>
-#include "NumCpp.hpp"
-#include "math.h"
 #include "csv.h"
+#include "math.h"
+#include "general.h"
 #include "kernels.h"
 #include "datastore.h"
 #include "constants.h"
 
-namespace fs = std::filesystem;
 
 double convert(const std::string &v)
 {
@@ -159,14 +157,14 @@ void set_throughput(map<int, float> &Throughput, const std::string &variant_name
         in.read_header(io::ignore_extra_column, "batch_size", "inference_time");
         int batch_size;
         float inference_time;
-        map<int, std::vector<float>> Inference_time;
+        std::map<int, std::vector<float>> Inference_time;
         while (in.read_row(batch_size, inference_time))
         {
             Inference_time[batch_size].push_back(inference_time);
         }
         for (auto &[batch_size, elapsed] : Inference_time)
         {
-            Throughput[batch_size] = nc::NdArray(elapsed).median().item();
+            Throughput[batch_size] = median(elapsed);
         }
     }
     catch (const std::exception &e)

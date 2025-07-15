@@ -7,6 +7,7 @@
 #include <vector>
 #include <thread>
 #include <fstream>
+#include <optional>
 #include <condition_variable>
 #include "engine.h"
 #include "utils/general.h"

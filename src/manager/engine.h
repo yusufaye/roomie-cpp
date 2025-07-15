@@ -4,9 +4,12 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <filesystem>
+#include "utils/general.h"
 #include "networking/port.h"
 #include "networking/message.h"
-#include "utils/general.h"
+
+namespace fs = std::filesystem;
 
 class Engine
 {
@@ -78,7 +81,7 @@ public:
     catch (const std::exception &e)
     {
       std::cerr << "⛔️[ENGINE]-run: " << e.what() << std::endl;
-      std::filesystem::remove(log_directory_);
+      fs::remove(log_directory_);
       throw e;
     }
 

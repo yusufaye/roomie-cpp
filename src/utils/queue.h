@@ -4,11 +4,10 @@
 
 #include <queue>
 #include <mutex>
-#include <condition_variable>
-
 #include <atomic>
 #include <vector>
 #include <iostream>
+#include <condition_variable>
 
 template <typename T>
 class BlockingQueue

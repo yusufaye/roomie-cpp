@@ -2,8 +2,8 @@
 #define DATASTORE_H
 
 #include <map>
+#include <set>
 #include <mutex>
-#include "NumCpp.hpp"
 #include "kernels.h"
 
 using namespace std;
@@ -26,7 +26,18 @@ public:
   int batch_size = 0;
   int model_memory = 0;
   int window_size = 10;
-  nc::NdArray<int> input_rates = nc::zeros<int>(1, 10);
+  std::vector<int> input_rates = {
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+  };
 
   Model() {}
 
@@ -90,7 +101,13 @@ public:
 
   float input_rate()
   {
-    return nc::mean(input_rates).item();
+    int total = 0;
+    for (size_t i = 0; i < input_rates.size(); i++)
+    {
+      total += input_rates[i];
+    }
+    
+    return total / input_rates.size();
   }
 
   float initial_duration()
@@ -123,7 +140,13 @@ public:
   float compute_workload()
   {
     // Calculate the workload based on the current load and the previously recorded input rate.
-    return qsize + input_rates.sum().item();
+    int workload = qsize;
+    for (size_t i = 0; i < input_rates.size(); i++)
+    {
+      workload += input_rates[i];
+    }
+    
+    return workload;
   }
 
   float compute_throughput()
@@ -302,7 +325,7 @@ public:
     return registration_;
   }
 
-  set<string> get_registered(const string &app_id) const
+  std::set<string> get_registered(const string &app_id) const
   {
     auto it = registration_.find(app_id);
     if (it != registration_.end())

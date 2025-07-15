@@ -1,5 +1,15 @@
-# Add models directory
-add_subdirectory(models)
+option(ENABLE_CUDA "Enable CUDA support" ON)
+
+# Find CUDA
+find_package(CUDA)
+
+# Set the executable name based on CUDA availability§/L.
+if(CUDA_FOUND OR ENABLE_CUDA)
+  set(EXECUTABLE_NAME "${PROJECT_NAME}_CUDA")
+  add_definitions(-DCUDA_AVAILABLE)
+else()
+  set(EXECUTABLE_NAME "${PROJECT_NAME}")
+endif()
 
 # Add networking directory
 add_subdirectory(networking)
@@ -14,6 +24,6 @@ add_subdirectory(scheduling)
 add_subdirectory(manager)
 
 # Create executable
-add_executable(${PROJECT_NAME} main.cpp)
-target_link_libraries(${PROJECT_NAME} models networking utils scheduling manager)
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(${EXECUTABLE_NAME} main.cpp)
+target_link_libraries(${EXECUTABLE_NAME} networking utils scheduling manager Threads::Threads) # if pthread is not included by default.
+target_include_directories(${EXECUTABLE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

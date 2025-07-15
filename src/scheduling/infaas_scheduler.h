@@ -2,7 +2,6 @@
 #define INFAAS_SCHEDULER_H
 
 #include <math.h>
-#include "NumCpp.hpp"
 #include "base_scheduler.h"
 #include "utils/general.h"
 #include "utils/datastore.h"

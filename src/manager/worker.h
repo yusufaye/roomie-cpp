@@ -12,7 +12,6 @@
 #include <condition_variable>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
-#include "NumCpp.hpp"
 #include "engine.h"
 #include "utils/queue.h"
 #include "utils/datastore.h"
@@ -32,6 +31,7 @@ public:
     device_ = new torch::Device(torch::kCUDA, device_index_);
     device_index_ = config_["parameters"]["device"].get<int>();
     hardware_platform_ = config_["parameters"]["hardware_platform"];
+    std::cout << "👉[WORKER] Given device is " << device_index_ << " 👈" << std::endl;
   }
 
   void run() override
@@ -116,6 +116,7 @@ public:
         {
           j.push_back({
               {"variant_id", variant->id},
+              {"variant_name", variant->name},
               {"throughput", variant->get_throughput()},
               {"input_rate", variant->input_rates},
           });
@@ -162,7 +163,7 @@ public:
   {
     try
     {
-      string model_filename = "/home/yusufaye/roomie-cpp/src/data/models/" + model->name + ".pt";
+      string model_filename = "/usmb/roomie/src/data/models/" + model->name + ".pt";
 
       c10::cuda::CUDAStream stream = c10::cuda::getStreamFromPool(/* isHighPriority = */ true, /* device_index = */ 0);
       c10::cuda::setCurrentCUDAStream(stream);

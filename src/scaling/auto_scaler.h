@@ -78,7 +78,7 @@ public:
           most_overloaded_app = {app_id, ratio};
         }
 
-        std::cout << "🔵[AUTO-SCALER] Ratio for app " + app_id + " is " + std::to_string(ratio) << std::endl;
+        std::cout << "🔵[AUTO-SCALER] For Load=" + std::to_string(workload) + ", Thr=" + std::to_string(throughput) + ", Ratio=" + std::to_string(ratio) << std::endl;
       }
 
       auto [app_id, ratio] = most_overloaded_app;
