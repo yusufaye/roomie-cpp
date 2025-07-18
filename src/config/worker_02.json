@@ -1,0 +1,17 @@
+{
+  "id": 0,
+  "host": "howsrv-3",
+  "port": 9092,
+  "type": "WorkerEngine",
+  "parameters": {
+    "log_dir": "logger/infaas/howsrv-3",
+    "hardware_platform": "xavier",
+    "device": 0
+  },
+  "remote_engines": [
+    {
+      "remote_host": "howsrv-3",
+      "remote_port": 8081
+    }
+  ]
+}

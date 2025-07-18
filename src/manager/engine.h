@@ -5,40 +5,30 @@
 #include <vector>
 #include <fstream>
 #include <filesystem>
+#include <nlohmann/json.hpp>
 #include "utils/general.h"
 #include "networking/port.h"
 #include "networking/message.h"
 
+using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 class Engine
 {
 protected:
   int id_ = 0;
+  json config_;
   bool running_ = true;
   std::string engine_name_ = "Engine";
-  json config_;
   std::string log_directory_;
   std::vector<InPort *> incoming_;
   std::vector<OutPort *> outgoing_;
   RandomGenerator generator_;
 
 public:
-  virtual void configure(const std::string &path)
+  virtual void configure(const json config)
   {
-    std::cout << "⚠️[" << engine_name_ << "] About to load configuration from " << "'" << path << "'" << std::endl;
-    try
-    {
-      // read a JSON file
-      std::ifstream i(path);
-      i >> config_;
-      i.close();
-    }
-    catch(const std::exception& e)
-    {
-      std::cerr << "⛔️Error loading configuration" << "\n\t" << e.what() << '\n';
-      return;
-    }
+    config_ = config;
     id_ = config_["id"].get<int>();
     // std::cout << "[" << engine_name_ << "] Loaded configuration: " << config_ << std::endl;
     if (config_["parameters"].contains("log_dir"))

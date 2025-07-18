@@ -10,7 +10,11 @@
   "remote_engines": [
     {
       "remote_host": "howsrv-3",
-      "remote_port": 9090
+      "remote_port": 9091
+    },
+    {
+      "remote_host": "howsrv-3",
+      "remote_port": 9092
     }
   ]
 }

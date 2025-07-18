@@ -17,9 +17,9 @@
 #include "networking/message.h"
 #include "scaling/auto_scaler.h"
 #include "scheduling/base_scheduler.h"
-// #include "scheduling/usher_scheduler.h"
+#include "scheduling/usher_scheduler.h"
 #include "scheduling/infaas_scheduler.h"
-// #include "scheduling/roomie_scheduler.h"
+#include "scheduling/roomie_scheduler.h"
 
 enum class Approach
 {
@@ -31,25 +31,22 @@ enum class Approach
 class Controller : public Engine
 {
 public:
-  Controller(Approach approach) : approach_(approach)
+  void configure(const json config)
   {
-    if (approach_ == Approach::INFAAS)
+    Engine::configure(config);
+    
+    if (config_["parameters"]["scheduling"] == "INFaaSSchaduling")
     {
       scheduler_ = new INFaaSScheduler();
     }
-    // else if (approach_ == Approach::USHER)
-    // {
-    //   scheduler_ = new UsherScheduler();
-    // }
-    // else
-    // {
-    //   scheduler_ = new RoomieScheduler();
-    // }
-  }
-
-  void configure(const std::string &path)
-  {
-    Engine::configure(path);
+    else if (config_["parameters"]["scheduling"] == "UsherSchaduling")
+    {
+      scheduler_ = new UsherScheduler();
+    }
+    else
+    {
+      scheduler_ = new RoomieScheduler();
+    }
 
     incoming2_ = new InPort(get_incoming()[0]->get_host(), get_incoming()[0]->get_port() + 1, [this](Message msg)
                             { this->push(msg); });
@@ -92,7 +89,7 @@ public:
 
   void push(const Message &msg) override
   {
-    // std::cout << "👉[CONTROLLER] Recv " + msg.to_string() << std::endl;
+    // std::cout << "👉[controller] Recv " + msg.to_string() << std::endl;
     if (msg.getType() == "REGISTER")
     {
       registration_queue_.push(msg);
@@ -110,9 +107,17 @@ public:
       int worker_id = std::stoi(msg.get_data()["worker_id"]);
       double total_mem = std::stod(msg.get_data()["total_mem"]);
       Worker *worker = datastore_.get_worker(worker_id);
-      worker->to_string();
-      worker->set_total_memory(total_mem);
-      std::cout << "👉[CONTROLLER] Update for " + worker->to_string() << std::endl;
+      worker->set_total_memory(total_mem / 2);
+      std::cout << "👉[controller] Update for " + worker->to_string() << std::endl;
+      event_.set();
+    }
+    else if (msg.getType() == "DEPLOYED")
+    {
+      int worker_id = std::stoi(msg.get_data()["worker_id"]);
+      double free_memory = std::stod(msg.get_data()["free_memory"]);
+      Worker *worker = datastore_.get_worker(worker_id);
+      worker->set_deployment(false);
+      std::cout << "👉[controller] Deployment done for " + worker->to_string() << std::endl;
       event_.set();
     }
   }
@@ -122,15 +127,15 @@ public:
     try
     {
       event_.wait();
-      std::cout << "👉[CONTROLLER] About to run registration daemon" << std::endl;
+      std::cout << "👉[controller] About to run registration daemon" << std::endl;
       while (true)
       {
         Message msg = registration_queue_.pop(); // blocks until message arrives
-        std::cout << "👉[CONTROLLER] New registration " << msg.to_string() << std::endl;
+        std::cout << "👉[controller] New registration " << msg.to_string() << std::endl;
         std::map<std::string, std::string> variant_names = msg.get_data(); // assumed typed extraction
         for (auto &[app_id, variant_name] : variant_names)
         {
-          std::cout << "👉[CONTROLLER] About to register app " << app_id << std::endl;
+          std::cout << "👉[controller] About to register app " << app_id << std::endl;
           datastore_.register_app(variant_name, variant_name);
           std::vector<Worker *> workers = datastore_.get_workers();
           std::vector<std::string> names;
@@ -139,15 +144,13 @@ public:
             names.push_back(name);
           }
           std::pair<Model *, Worker *> result = scheduler_->schedule(workers, names);
-          // Model *variant = result.first;
-          // Worker *worker = result.second;
           deploy(app_id, *result.first, *result.second);
 
           forward_query_threads_.emplace_back([this, variant_name]()
                                               {
                                                 query_daemon(variant_name); // starts query loop per variant
                                               });
-          std::cout << "👉[CONTROLLER] Registered app " << app_id << std::endl;
+          std::cout << "👉[controller] Registered app " << app_id << std::endl;
         }
 
         autoscaler_->set_event();
@@ -155,7 +158,7 @@ public:
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️Error with registration daemon\n\t" << e.what() << '\n';
+      std::cerr << "⛔️ Error with registration daemon\n\t" << e.what() << '\n';
     }
   }
 
@@ -185,19 +188,19 @@ public:
                   {
                     variant->input_rates[i] = input_rates[i];
                   }
-                  break;
+                  break; // end for updating variant.
                 }
               }
             }
+            break; // end for updating all variants.
           }
-          break;
         }
         update_load_balancer();
       }
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️Error with profiling daemon\n\t" << e.what() << '\n';
+      std::cerr << "⛔️ Error with profiling daemon\n\t" << e.what() << '\n';
     }
   }
 
@@ -244,11 +247,16 @@ public:
         loadb_.set(app_id, key, weights[i]);
       }
     }
-    // std::cout << "👉[CONTROLLER] Updated load-balancing: " + loadb_.to_string() << std::endl;
+    // std::cout << "👉[controller] Updated load-balancing: " + loadb_.to_string() << std::endl;
   }
 
   void deploy(const std::string &app_id, Model &variant, Worker &worker)
   {
+    if (worker.percent_occupation(variant.get_memory()) > MAX_GPU_MEMORY_OCCUPANCY)
+    {
+      throw std::runtime_error("⛔️[controller] error " + variant.to_string() + " to " + worker.to_string() + "\n\t| New occupancy: " + std::to_string(worker.percent_occupation(variant.get_memory())) + " (%)");
+    }
+    worker.set_deployment(true);
     variant.id = get_generator()->next();
     std::map<std::string, std::string> data = {
         {"id", std::to_string(variant.id)},
@@ -256,24 +264,25 @@ public:
         {"batch_size", std::to_string(variant.batch_size)},
     };
     Message msg("DEPLOY", data);
+
     send(worker, msg);
+    // worker.add_variant(&variant);
     if (datastore_.push(worker.get_id(), &variant) == nullptr)
     {
-      std::cerr << "⛔️Error adding variant to worker" << std::endl;
+      std::cerr << "⛔️ Error adding variant to worker" << std::endl;
     }
-    std::cout << "👉[CONTROLLER] Will deploy " << variant.to_string() << " to " << worker.to_string() << std::endl;
   }
 
   void stop(const std::string &app_id, Model &variant, Worker &worker)
   {
     std::map<std::string, std::string> data = {
-        {"id", std::to_string(variant.id)},
-        {"name", variant.name},
+        {"variant_id", std::to_string(variant.id)},
+        {"variant_name", variant.name},
     };
     Message msg("STOP", data);
     send(worker, msg);
     datastore_.remove(worker.get_id(), &variant);
-    std::cout << "👉[CONTROLLER] Will stop " << variant.to_string() << " at " << worker.to_string() << std::endl;
+    std::cout << "👉[controller] Will stop " << variant.to_string() << " at " << worker.to_string() << std::endl;
   }
 
   void send(Worker &worker, const Message &msg)
@@ -283,7 +292,7 @@ public:
 
   void query_daemon(const std::string &app_id)
   {
-    std::cout << "😎Query forwarder will start for application " + app_id << std::endl;
+    std::cout << "😎 Query forwarder will start for application " + app_id << std::endl;
     while (true)
     {
       std::optional<std::string> key = loadb_.next(app_id);
@@ -302,7 +311,7 @@ public:
       }
       else
       {
-        std::cerr << "⚠️No variant instance found for the application " << app_id << std::endl;
+        std::cerr << "⚠️ No variant instance found for the application " << app_id << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(1));
       }
     }

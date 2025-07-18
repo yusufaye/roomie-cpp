@@ -31,18 +31,9 @@ public:
         }
         catch (const std::exception &e)
         {
-          std::cerr << "⛔️Error while load model metadata\n\t" << e.what() << '\n';
+          std::cerr << "⛔️ Error while load model metadata\n\t" << e.what() << '\n';
           throw e;
         }
-
-        // std::vector<std::string> names;
-        // for (auto *_variant : worker->get_variants())
-        // {
-        //   names.push_back(_variant->name);
-        // }
-
-        // if (std::find(names.begin(), names.end(), variant->name) == names.end())
-        //   continue;
 
         for (int batch_size : BATCH_SIZES)
         {
@@ -51,6 +42,7 @@ public:
           if (new_variant->get_profile_throughput() == 0 ||
               worker->percent_occupation(new_variant->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY)
           {
+            // std::cerr << "Not enough memory for " + new_variant->to_string() + "\n\t Occupancy would be: " + std::to_string(worker->percent_occupation(new_variant->get_memory())) << std::endl;
             continue;
           }
 
@@ -75,7 +67,7 @@ public:
             if (new_variant->get_profile_throughput() == 0 ||
                 worker->percent_occupation(new_variant->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY)
             {
-              std::cout << "--> Cannot hold " << new_variant->to_string() << " Free mem: " << worker->percent_occupation(new_variant->get_memory()) << "(" << MAX_GPU_MEMORY_OCCUPANCY << "%)" << std::endl;
+              // std::cout << "--> Cannot hold " << new_variant->to_string() << " Free mem: " << worker->percent_occupation(new_variant->get_memory()) << "(" << MAX_GPU_MEMORY_OCCUPANCY << "%)" << std::endl;
               continue;
             }
 

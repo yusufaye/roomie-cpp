@@ -185,7 +185,7 @@ public:
   {
     if (retry_count_ >= max_retries_)
     {
-      std::cerr << "⛔️Max retries reached. Giving up.\n";
+      std::cerr << "⛔️ Max retries reached. Giving up.\n";
       return;
     }
     retry_count_++;
@@ -226,16 +226,22 @@ private:
     {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-
-    while (true)
+    try
     {
-      Message message = message_queue_.pop();
-      client_.send(hdl_, message.serialize(), websocketpp::frame::opcode::text);
-      if (message.getType() == "FINISHED")
+      while (true)
       {
-        cout << "--- Will close connection---" << endl;
-        break;
+        Message message = message_queue_.pop();
+        client_.send(hdl_, message.serialize(), websocketpp::frame::opcode::text);
+        if (message.getType() == "FINISHED")
+        {
+          cout << "--- Will close connection---" << endl;
+          break;
+        }
       }
+    }
+    catch(const std::exception& e)
+    {
+      std::cerr << "⛔️ Connection lost\n\t" << e.what() << '\n';
     }
   }
 

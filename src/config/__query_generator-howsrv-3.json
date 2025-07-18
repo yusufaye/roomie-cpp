@@ -20,7 +20,7 @@
       "fasterrcnn_resnet50_fpn"
     ],
     "qps": 1000,
-    "path": "/home/yusufaye/roomie-cpp/src/data/synthetic-data/synthetic-data_qps1000_achieved-qps9831_jetson_agx_xavier.csv"
+    "path": "src/data/synthetic-data/synthetic-data_qps1000_achieved-qps9831_jetson_agx_xavier.csv"
   },
   "remote_engines": [
     {

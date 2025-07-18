@@ -57,7 +57,7 @@ public:
   NvidiaGpuSpec(int major, int minor)
   {
     string computeCapability = major + "." + minor;
-    string pathname = "/usmb/roomie/src/data/gpu/gpu-configs.csv";
+    string pathname = "src/data/gpu/gpu-configs.csv";
     // csv::CSVReader reader(pathname);
     // for (csv::CSVRow& row : reader)
     // {

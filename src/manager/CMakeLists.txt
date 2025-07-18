@@ -10,7 +10,6 @@ find_package(nlohmann_json REQUIRED)
 if(CUDA_FOUND OR ENABLE_CUDA)
   # Find libtorch
   find_package(Torch REQUIRED HINTS /usr/local/libtorch)
-  # find_package(Torch REQUIRED HINTS /usr/local/libtorch/libtorch)
 
   add_library(manager engine.h worker.h)
   target_link_libraries(manager ${nlohmann_json_LIBRARIES} ${TORCH_LIBRARIES})

@@ -3,6 +3,7 @@
 
 // #include <format>
 #include <string>
+#include <fstream>
 #include <iostream>
 #include "csv.h"
 #include "math.h"
@@ -11,6 +12,9 @@
 #include "datastore.h"
 #include "constants.h"
 
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
 
 double convert(const std::string &v)
 {
@@ -28,103 +32,62 @@ double convert(const std::string &v)
     }
     catch (const std::invalid_argument &e)
     {
-        std::cerr << "⛔️Error: Invalid number format: " << v << std::endl;
+        std::cerr << "⛔️ Error: Invalid number format: " << v << std::endl;
         return 0.0; // Handle invalid cases
     }
 }
 
 // Function to read CSV file
-void set_profiled_kernels(std::vector<NcuKernel *> &kernels, const std::string &model_name, int batch_size, std::string data_path = "data/traces")
+void set_profiled_kernels(Model &model, std::string data_path = "data/traces")
 {
-    std::string fullpath = WORKDIR + "/" + data_path + "/nsight-compute/xavier/" + model_name + "_batch-size" + std::to_string(batch_size) + "_nsight-compute.ncu-rep.csv";
+    std::string fullpath = WORKDIR + "/" + data_path + "/nsight-compute/xavier/" + model.name + "_preprocessed_ncu.json";
+    json j;
     try
     {
-        io::CSVReader<24> in(fullpath);
-        in.read_header(io::ignore_extra_column,
-                       "kernel_name",
-                       "block_dim_x",
-                       "block_dim_y",
-                       "block_dim_z",
-                       "grid_dim_x",
-                       "grid_dim_y",
-                       "grid_dim_z",
-                       "register_per_thread",
-                       "duration",
-                       "static_shared_memory_per_block",
-                       "dynamic_shared_memory_per_block",
-                       "threads",
-                       "waves_per_sm",
-                       "shared_memory",
-                       "theoretical_occupancy",
-                       "theoretical_active_warps_per_SM",
-                       "achieved_occupancy",
-                       "achieved_active_warps_per_SM",
-                       "block_limit_registers",
-                       "block_limit_shared_mem",
-                       "block_limit_warps",
-                       "block_limit_sm",
-                       "capability_minor",
-                       "capability_major");
-        std::string kernel_name;
-        int block_dim_x, block_dim_y, block_dim_z, grid_dim_x, grid_dim_y, grid_dim_z, register_per_thread;
-        float duration, static_shared_memory_per_block, dynamic_shared_memory_per_block, threads, waves_per_sm, shared_memory, theoretical_occupancy, theoretical_active_warps_per_SM, achieved_occupancy, achieved_active_warps_per_SM, block_limit_registers, block_limit_shared_mem, block_limit_warps, block_limit_sm, capability_minor, capability_major;
-        NcuKernel *kernel;
-        while (in.read_row(kernel_name,
-                           block_dim_x,
-                           block_dim_y,
-                           block_dim_z,
-                           grid_dim_x,
-                           grid_dim_y,
-                           grid_dim_z,
-                           register_per_thread,
-                           duration,
-                           static_shared_memory_per_block,
-                           dynamic_shared_memory_per_block,
-                           threads,
-                           waves_per_sm,
-                           shared_memory,
-                           theoretical_occupancy,
-                           theoretical_active_warps_per_SM,
-                           achieved_occupancy,
-                           achieved_active_warps_per_SM,
-                           block_limit_registers,
-                           block_limit_shared_mem,
-                           block_limit_warps,
-                           block_limit_sm,
-                           capability_minor,
-                           capability_major))
-        {
-            kernel = new NcuKernel();
-            kernel->kernel_name = kernel_name;
-            kernel->block_dim_x = block_dim_x;
-            kernel->block_dim_y = block_dim_y;
-            kernel->block_dim_z = block_dim_z;
-            kernel->grid_dim_x = grid_dim_x;
-            kernel->grid_dim_y = grid_dim_y;
-            kernel->grid_dim_z = grid_dim_z;
-            kernel->register_per_thread = register_per_thread;
-            kernel->duration = duration;
-            kernel->static_shared_memory_per_block = static_shared_memory_per_block;
-            kernel->dynamic_shared_memory_per_block = dynamic_shared_memory_per_block;
-            kernel->threads = threads;
-            kernel->waves_per_sm = waves_per_sm;
-            kernel->shared_memory = shared_memory;
-            kernel->theoretical_occupancy = theoretical_occupancy;
-            kernel->theoretical_active_warps_per_SM = theoretical_active_warps_per_SM;
-            kernel->achieved_occupancy = achieved_occupancy;
-            kernel->achieved_active_warps_per_SM = achieved_active_warps_per_SM;
-            kernel->block_limit_registers = block_limit_registers;
-            kernel->block_limit_shared_mem = block_limit_shared_mem;
-            kernel->block_limit_warps = block_limit_warps;
-            kernel->block_limit_sm = block_limit_sm;
-            kernel->capability_minor = capability_minor;
-            kernel->capability_major = capability_major;
-            kernels.push_back(kernel);
-        }
+        // read a JSON file
+        std::ifstream i(fullpath);
+        i >> j;
+        i.close();
     }
     catch (const std::exception &e)
     {
-        std::cerr << "⛔️No trace found at " << fullpath << "\n\t" << e.what() << '\n';
+        std::cerr << "⛔️ Error loading profiled data" << "\n\t" << e.what() << '\n';
+        return;
+    }
+    NcuKernel *kernel;
+    for (const auto &item : j["traces"])
+    {
+        std::vector<NcuKernel *> kernels;
+        for (const auto &k : item["kernels"])
+        {
+            kernel = new NcuKernel();
+            kernel->kernel_name = k["kernel_name"];
+            kernel->block_dim_x = k["block_dim_x"];
+            kernel->block_dim_y = k["block_dim_y"];
+            kernel->block_dim_z = k["block_dim_z"];
+            kernel->grid_dim_x = k["grid_dim_x"];
+            kernel->grid_dim_y = k["grid_dim_y"];
+            kernel->grid_dim_z = k["grid_dim_z"];
+            kernel->register_per_thread = k["register_per_thread"];
+            kernel->duration = k["duration"];
+            kernel->static_shared_memory_per_block = k["static_shared_memory_per_block"];
+            kernel->dynamic_shared_memory_per_block = k["dynamic_shared_memory_per_block"];
+            kernel->threads = k["threads"];
+            kernel->waves_per_sm = k["waves_per_sm"];
+            kernel->shared_memory = k["shared_memory"];
+            kernel->theoretical_occupancy = k["theoretical_occupancy"];
+            kernel->theoretical_active_warps_per_SM = k["theoretical_active_warps_per_SM"];
+            kernel->achieved_occupancy = k["achieved_occupancy"];
+            kernel->achieved_active_warps_per_SM = k["achieved_active_warps_per_SM"];
+            kernel->block_limit_registers = k["block_limit_registers"];
+            kernel->block_limit_shared_mem = k["block_limit_shared_mem"];
+            kernel->block_limit_warps = k["block_limit_warps"];
+            kernel->block_limit_sm = k["block_limit_sm"];
+            kernel->capability_minor = k["capability_minor"];
+            kernel->capability_major = k["capability_major"];
+            kernels.push_back(kernel);
+        }
+        (*model.get_Kernel())[item["batch_size"]] = kernels;
     }
 }
 
@@ -144,7 +107,7 @@ void set_memory(map<int, unsigned long> &Memory, const std::string &variant_name
     }
     catch (const std::exception &e)
     {
-        std::cerr << "⛔️Error setting memory for " << variant_name << "\n\t" << e.what() << '\n';
+        std::cerr << "⛔️ Error setting memory for " << variant_name << "\n\t" << e.what() << '\n';
     }
 }
 
@@ -169,17 +132,13 @@ void set_throughput(map<int, float> &Throughput, const std::string &variant_name
     }
     catch (const std::exception &e)
     {
-        std::cerr << "⛔️Error setting throughput for " << variant_name << "\n\t" << e.what() << '\n';
+        std::cerr << "⛔️ Error setting throughput for " << variant_name << "\n\t" << e.what() << '\n';
     }
 }
 
 void pre_profiled(Model &model)
 {
-    for (int batch_size : BATCH_SIZES)
-    {
-        std::vector<NcuKernel *> *kernels = &((*model.get_Kernel())[batch_size]);
-        set_profiled_kernels(*kernels, model.name, batch_size);
-    }
+    set_profiled_kernels(model);
     set_memory(*(model.get_Memory()), model.name, model.hardware_platform);
     set_throughput(*(model.get_Throughput()), model.name, model.hardware_platform);
 }

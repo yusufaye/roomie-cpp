@@ -16,7 +16,7 @@ enum class Type
     FINISHED,
     REGISTER,
     PROFILE_DATA,
-    WARMING_DONE,
+    DEPLOYED,
     STOP,
     DEPLOY,
 };
@@ -33,7 +33,7 @@ std::map<Type, std::string> type2string = {
     {Type::FINISHED, "FINISHED"},
     {Type::REGISTER, "REGISTER"},
     {Type::PROFILE_DATA, "PROFILE_DATA"},
-    {Type::WARMING_DONE, "WARMING_DONE"},
+    {Type::DEPLOYED, "DEPLOYED"},
     {Type::STOP, "STOP"},
     {Type::DEPLOY, "DEPLOY"},
 };

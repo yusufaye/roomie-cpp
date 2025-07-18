@@ -25,9 +25,9 @@ using json = nlohmann::json;
 class WorkerEngine : public Engine
 {
 public:
-  void configure(const std::string &path)
+  void configure(const json config)
   {
-    Engine::configure(path);
+    Engine::configure(config);
     device_ = new torch::Device(torch::kCUDA, device_index_);
     device_index_ = config_["parameters"]["device"].get<int>();
     hardware_platform_ = config_["parameters"]["hardware_platform"];
@@ -124,12 +124,12 @@ public:
         std::map<std::string, std::string> data = {{"worker_id", std::to_string(id_)}, {"variants", j.dump()}};
         Message msg("PROFILE_DATA", data);
         outgoing_[0]->push(msg);
-        std::cout << "👉[WORKER] Monitoring with " + msg.to_string() << std::endl;
+        // std::cout << "👉[WORKER] Monitoring with " + msg.to_string() << std::endl;
       }
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️Error with monitor daemon\n\t" << e.what() << '\n';
+      std::cerr << "⛔️ Error with monitor daemon\n\t" << e.what() << '\n';
     }
   }
 
@@ -140,7 +140,7 @@ public:
       while (true)
       {
         auto msg = deployment_queue_.pop(); // blocks until message arrives
-        std::cout << "👉[WORKER] About to deploy " << msg.to_string() << std::endl;
+        // std::cout << "👉[WORKER] About to deploy " << msg.to_string() << std::endl;
         Model *model = new Model();
         model->id = std::stoi(msg.get_data()["id"]);
         model->name = msg.get_data()["name"];
@@ -155,7 +155,7 @@ public:
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️Error with profiling daemon\n\t" << e.what() << '\n';
+      std::cerr << "⛔️ Error with profiling daemon\n\t" << e.what() << '\n';
     }
   }
 
@@ -163,7 +163,7 @@ public:
   {
     try
     {
-      string model_filename = "/usmb/roomie/src/data/models/" + model->name + ".pt";
+      string model_filename = "src/data/models/" + model->name + ".pt";
 
       c10::cuda::CUDAStream stream = c10::cuda::getStreamFromPool(/* isHighPriority = */ true, /* device_index = */ 0);
       c10::cuda::setCurrentCUDAStream(stream);
@@ -174,6 +174,13 @@ public:
       int data;
       chrono::_V2::system_clock::time_point startTime;
       chrono::_V2::system_clock::time_point endTime;
+
+      size_t free_memory;
+      size_t total_memory;
+      cudaMemGetInfo(&free_memory, &total_memory);
+      std::cout << "⚠️ [worker] New deployment\n\t| Name: " + model->name + "\n\t| Batch-size: " + std::to_string(model->batch_size) + "\n\t| Free-memory: " + std::to_string(free_memory / (1024.0 * 1024)) + " MB" << std::endl;
+      Message msg("DEPLOYED", {{"worker_id", std::to_string(id_)}, {"free_memory", std::to_string(free_memory)}, {"total_memory", std::to_string(total_memory)}});
+      outgoing_[0]->push(msg);
       while (true)
       {
         try
@@ -181,11 +188,12 @@ public:
           data = queue->pop();
           if (data == 0)
           {
-            break;
+            std::cout << "⚠️ [worker] About to stop | Name: " + model->name + ", batch-size: " + std::to_string(model->batch_size) << std::endl;
+            return;
           }
           startTime = chrono::high_resolution_clock::now();
           module.forward({input});
-          std::this_thread::sleep_for(std::chrono::milliseconds(100)); // [TODO] Debug purpose.
+          // std::this_thread::sleep_for(std::chrono::milliseconds(100)); // [TODO] Debug purpose.
           endTime = chrono::high_resolution_clock::now();
           model->set_throughput(model->batch_size / std::chrono::duration_cast<std::chrono::duration<double>>(endTime - startTime).count());
         }
@@ -197,7 +205,7 @@ public:
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️Error initializing model\n\t" << e.what() << '\n';
+      std::cerr << "⛔️ Error initializing model\n\t" << e.what() << '\n';
     }
   }
 

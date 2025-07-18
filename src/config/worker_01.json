@@ -1,8 +1,8 @@
 {
   "id": 0,
   "host": "howsrv-3",
-  "port": 9090,
-  "type": "WorkerExecutor",
+  "port": 9091,
+  "type": "WorkerEngine",
   "parameters": {
     "log_dir": "logger/infaas/howsrv-3",
     "hardware_platform": "xavier",

@@ -64,7 +64,7 @@ public:
   {
   }
 
-  std::vector<NcuKernel *> get_kernels(int bs = 0)
+  std::vector<NcuKernel *> get_kernels(int bs = 0) const
   {
     if (bs == 0)
       bs = batch_size;
@@ -110,11 +110,12 @@ public:
     return total / input_rates.size();
   }
 
-  float initial_duration()
+  float initial_duration() const
   {
-    float value = 0;
-    for (auto &it : get_kernels())
+    float value = 0.0;
+    for (const NcuKernel * it : get_kernels()) {
       value += it->duration;
+    }
     return value;
   }
 
@@ -187,31 +188,31 @@ class Worker
 {
 public:
   Worker(int id, int device = 0, string hardware_platform = "xavier")
-      : id(id), device(device), hardware_platform(hardware_platform), total_memory(0.0) {}
+      : id_(id), device_(device), hardware_platform_(hardware_platform), total_memory_(0.0) {}
 
   float get_free_memory() const
   {
     float total_variant_memory = 0.0f;
-    for (const auto &variant : variants)
+    for (const auto &variant : variants_)
     {
       total_variant_memory += variant->get_memory();
     }
-    return total_memory - total_variant_memory;
+    return total_memory_ - total_variant_memory;
   }
 
   float percent_occupation(float additional = 0.0f) const
   {
     float mem_used = additional;
-    for (const auto &variant : variants)
+    for (const auto &variant : variants_)
     {
       mem_used += variant->get_memory();
     }
-    return (mem_used / total_memory) * 100.0f;
+    return (mem_used / total_memory_) * 100.0f;
   }
 
   void update_variant(Model &variant)
   {
-    for (auto &running_variant : variants)
+    for (auto &running_variant : variants_)
     {
       if (*running_variant == variant)
       {
@@ -221,23 +222,18 @@ public:
     }
   }
 
-  int get_total_running_variants() const
-  {
-    return variants.size();
-  }
-
   bool operator==(const Worker &other) const
   {
-    return id == other.id;
+    return id_ == other.id_;
   }
 
   std::string to_string()
   {
-    std::string os = "Worker('id'=" + std::to_string(id) + ", 'free memory'=" + std::to_string(get_free_memory()) + ", 'total memory'=" + std::to_string(total_memory) + ", 'hardware platform'=" + hardware_platform + ", 'variants'=[";
-    for (size_t i = 0; i < variants.size(); ++i)
+    std::string os = "Worker('id'=" + std::to_string(id_) + ", 'free memory'=" + std::to_string(get_free_memory()) + ", 'total memory'=" + std::to_string(total_memory_) + ", 'hardware platform'=" + hardware_platform_ + ", 'deploying'=" + std::to_string(deploying_) + ", 'variants'=[";
+    for (size_t i = 0; i < variants_.size(); ++i)
     {
-      os += variants[i]->name;
-      if (i < variants.size() - 1)
+      os += variants_[i]->name;
+      if (i < variants_.size() - 1)
       {
         os += ", ";
       }
@@ -246,55 +242,42 @@ public:
     return os;
   }
 
-  friend ostream &operator<<(ostream &os, const Worker &worker)
-  {
-    os << "Worker('id'=" << worker.id << ", 'free memory'=" << worker.get_free_memory()
-       << ", 'total memory'=" << worker.total_memory << ", 'hardware platform'=" << worker.hardware_platform
-       << ", 'variants'=[";
-    for (size_t i = 0; i < worker.variants.size(); ++i)
-    {
-      os << worker.variants[i]->name;
-      if (i < worker.variants.size() - 1)
-      {
-        os << ", ";
-      }
-    }
-    os << "])";
-    return os;
-  }
+  void set_total_memory(double value) { total_memory_ = value; }
 
-  void set_total_memory(double value) { total_memory = value; }
+  void set_deployment(bool value) { deploying_ = value; }
 
-  void add_variant(Model *variant)
-  {
-    variants.push_back(variant);
+  void add_variant(Model *variant) {
+    variants_.push_back(variant);
   }
 
   void remove_variant(Model *variant)
   {
-    for (auto it = variants.begin(); it != variants.end(); ++it)
+    for (auto it = variants_.begin(); it != variants_.end(); ++it)
     {
       if (**it == *variant)
       {
-        variants.erase(it);
+        variants_.erase(it);
         break;
       }
     }
   }
 
-  std::vector<Model *> get_variants() const { return variants; }
-  int get_id() const { return id; }
-  int get_device() const { return device; }
-  double get_total_memory() const { return total_memory; }
-  string get_hardware_platform() const { return hardware_platform; }
+  std::vector<Model *> get_variants() const { return variants_; }
+  int get_id() const { return id_; }
+  int get_device() const { return device_; }
+  double get_total_memory() const { return total_memory_; }
+  string get_hardware_platform() const { return hardware_platform_; }
+  bool is_deploying() const { return deploying_; }
+  int get_total_running_variants() const { return variants_.size(); }
 
 private:
-  int id;
-  int device;
-  string hardware_platform;
-  double total_memory;
-  string device_name;
-  std::vector<Model *> variants;
+  int id_;
+  int device_;
+  string hardware_platform_;
+  double total_memory_;
+  string device_name_;
+  bool deploying_ = false;
+  std::vector<Model *> variants_;
 };
 
 class DataStore

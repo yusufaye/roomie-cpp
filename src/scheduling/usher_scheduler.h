@@ -64,7 +64,7 @@ public:
 
     if (variant_workers.empty())
     {
-      std::cout << "[USER] Warning no variant candidate found" << std::endl;
+      std::cout << "🤕[Usher] Warning no variant candidate found" << std::endl;
       return {nullptr, nullptr};
     }
     auto variant = get<0>(variant_workers[0]);
@@ -72,15 +72,19 @@ public:
     return {variant, worker};
   }
 
-  vector<tuple<Model *, Worker *, float>> usher(vector<Worker *> workers, vector<string> variant_candidates)
+  std::vector<std::tuple<Model *, Worker *, float>> usher(std::vector<Worker *> workers, std::vector<string> variant_candidates)
   {
-    vector<tuple<Model *, Worker *, float>> variant_workers;
+    std::vector<std::tuple<Model *, Worker *, float>> variant_workers;
     for (const auto &variant_name : variant_candidates)
     {
-      for (const auto &batch_size : BATCH_SIZES)
+      for (const int &batch_size : BATCH_SIZES)
       {
         auto groups = variant_grouping(workers, variant_name, batch_size);
-        variant_workers.insert(variant_workers.end(), decision_configuration_and_placement(groups, workers).begin(), decision_configuration_and_placement(groups, workers).end());
+        auto result = decision_configuration_and_placement(groups, workers);
+        for (const std::tuple<Model *, Worker *, float> item : result)
+        {
+          variant_workers.push_back(item);
+        }
       }
     }
     return variant_workers;
@@ -98,7 +102,7 @@ public:
         continue;
       }
       hardware_platforms.push_back(worker->get_hardware_platform());
-      Model *variant = load_model_metadata(worker->get_hardware_platform(), worker->get_hardware_platform());
+      Model *variant = new Model(*this->load_model_metadata(worker->get_hardware_platform(), variant_name));
       variant->batch_size = batch_size;
       if (variant->get_profile_throughput() == 0)
       {
@@ -184,16 +188,23 @@ public:
     return groups;
   }
 
-  std::vector<std::tuple<UsherModel *, Worker *, float>> decision_configuration_and_placement(std::vector<std::vector<UsherModel *>> groups, std::vector<Worker *> workers)
+  std::vector<std::tuple<Model *, Worker *, float>> decision_configuration_and_placement(std::vector<std::vector<UsherModel *>> groups, std::vector<Worker *> workers)
   {
-    std::vector<std::tuple<UsherModel *, Worker *, float>> variant_worker;
+    std::vector<std::tuple<Model *, Worker *, float>> variant_worker;
     for (auto &group : groups)
     {
+      if (group.empty())
+      {
+        continue;
+      }
       // 1. Generate possible configurations, i.e., list of (batch size, replica degree) for each variant in a group (Gi).
       // we will consider using only one replica at time and then scale accordingly.
       // 2. For each configuration, find the placement to minimize the cost or maximize the goodput.
       std::vector<std::tuple<Model *, Worker *, float>> placements = placement(group, workers);
-      variant_worker.insert(variant_worker.end(), placements.begin(), placements.end());
+      for (const auto placement : placements)
+      {
+        variant_worker.push_back(placement);
+      }
     }
     return variant_worker;
   }
@@ -201,13 +212,13 @@ public:
   std::vector<std::tuple<Model *, Worker *, float>> placement(const std::vector<UsherModel *> &group, const std::vector<Worker *> &workers)
   {
     std::vector<Worker *> GiGPU;
-    for (const auto &variant : group)
+    for (const auto &wrapper : group)
     {
-      if (variant->model->id)
+      if (wrapper->model->id > 0)
       {
         for (const auto &worker : workers)
         {
-          if (std::find(worker->get_variants().begin(), worker->get_variants().end(), variant) != worker->get_variants().end() && std::find(GiGPU.begin(), GiGPU.end(), worker) == GiGPU.end())
+          if (std::find(worker->get_variants().begin(), worker->get_variants().end(), wrapper->model) != worker->get_variants().end() && std::find(GiGPU.begin(), GiGPU.end(), worker) == GiGPU.end())
           {
             GiGPU.push_back(worker);
           }
@@ -274,16 +285,16 @@ public:
     }
     std::vector<std::tuple<Model *, Worker *, float>> variant_worker;
     std::vector<Worker *> worker_candidates;
-    for (auto &variant_pair : final_model_list)
+    for (auto &wrapper_pair : final_model_list)
     {
       worker_candidates.clear();
-      for (auto &variant : {variant_pair.first, variant_pair.second})
+      for (auto &wrapper : {wrapper_pair.first, wrapper_pair.second})
       {
-        if (variant->model->id > 0)
+        if (wrapper->model->id > 0)
         {
           for (auto &worker : workers)
           {
-            if (std::find(worker->get_variants().begin(), worker->get_variants().end(), variant) != worker->get_variants().end())
+            if (std::find(worker->get_variants().begin(), worker->get_variants().end(), wrapper->model) != worker->get_variants().end())
             {
               worker_candidates.push_back(worker);
             }
@@ -291,25 +302,29 @@ public:
         }
       }
 
-      for (auto &variant : {variant_pair.first, variant_pair.second})
+      for (auto &wrapper : {wrapper_pair.first, wrapper_pair.second})
       {
-        if (variant->model->id <= 0)
+        if (wrapper->model->id > 0) // Ignore if already deployed.
+        {
           continue;
-
-        // [TODO]
-        // worker_candidates.erase(
-        //     std::remove_if(worker_candidates.begin(), worker_candidates.end(),
-        //                    [&](Worker &worker)
-        //                    {
-        //                      return worker.percent_occupation(variant->model->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY;
-        //                    }),
-        //     worker_candidates.end());
+        }
+        {
+          auto worker_candidates_ = worker_candidates;
+          worker_candidates.clear();
+          for (const auto worker : worker_candidates_)
+          {
+            if (worker->percent_occupation(wrapper->model->get_memory()) <= MAX_GPU_MEMORY_OCCUPANCY)
+            {
+              worker_candidates.push_back(worker);
+            }
+          }
+        }
 
         if (worker_candidates.empty() && !GiGPU.empty())
         {
           for (auto &worker : GiGPU)
           {
-            if (worker->percent_occupation(variant->model->get_memory()) <= MAX_GPU_MEMORY_OCCUPANCY)
+            if (worker->percent_occupation(wrapper->model->get_memory()) <= MAX_GPU_MEMORY_OCCUPANCY)
             {
               worker_candidates.push_back(worker);
             }
@@ -318,11 +333,10 @@ public:
 
         if (worker_candidates.empty())
         {
-          worker_candidates.clear();
           for (auto &worker : workers)
           {
-            if (worker->get_hardware_platform() == variant->model->hardware_platform &&
-                worker->percent_occupation(variant->model->get_memory()) <= MAX_GPU_MEMORY_OCCUPANCY)
+            if (worker->get_hardware_platform() == wrapper->model->hardware_platform &&
+                worker->percent_occupation(wrapper->model->get_memory()) <= MAX_GPU_MEMORY_OCCUPANCY)
             {
               worker_candidates.push_back(worker);
             }
@@ -339,7 +353,9 @@ public:
         }
 
         if (worker_candidates.empty())
+        {
           continue;
+        }
 
         std::vector<float> c_space_m_space;
         UsherModel *tmp;
@@ -351,7 +367,7 @@ public:
             tmp = new UsherModel(v, worker);
             total += tmp->c_req + tmp->m_req;
           }
-          total += variant->c_req + variant->m_req;
+          total += wrapper->c_req + wrapper->m_req;
           c_space_m_space.push_back(total);
         }
 
@@ -364,7 +380,7 @@ public:
           GiGPU.push_back(selected_worker);
         }
 
-        variant_worker.push_back(std::make_tuple(variant->model, selected_worker, c_space_m_space[argmax]));
+        variant_worker.push_back(std::make_tuple(wrapper->model, selected_worker, c_space_m_space[argmax]));
       }
     }
     return variant_worker;

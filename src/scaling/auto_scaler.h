@@ -33,7 +33,7 @@ public:
   void run()
   {
     event_.wait();
-    std::cout << "😎[AUTO-SCALER] About to start the auto-scaling." << std::endl;
+    std::cout << "😎 [auto-scaler] About to start the auto-scaling." << std::endl;
 
     // Start monitoring loop
     while (true)
@@ -66,11 +66,11 @@ public:
           continue;
 
         double throughput = 0.0;
-        double workload   = 0.0;
+        double workload = 0.0;
         for (Model *variant : running_variants)
         {
-          throughput  += variant->compute_throughput();
-          workload    += variant->compute_workload();
+          throughput += variant->compute_throughput();
+          workload += variant->compute_workload();
         }
         double ratio = workload / throughput;
         if (ratio > most_overloaded_app.second)
@@ -78,7 +78,7 @@ public:
           most_overloaded_app = {app_id, ratio};
         }
 
-        std::cout << "🔵[AUTO-SCALER] For Load=" + std::to_string(workload) + ", Thr=" + std::to_string(throughput) + ", Ratio=" + std::to_string(ratio) << std::endl;
+        // std::cout << "🔵 [auto-scaler] For " + app_id + " Load=" + std::to_string(workload) + ", Thr=" + std::to_string(throughput) + ", Ratio=" + std::to_string(ratio) << std::endl;
       }
 
       auto [app_id, ratio] = most_overloaded_app;
@@ -103,12 +103,6 @@ public:
       auto departure = Downscaling(app_id, true);
       if (departure.first != nullptr)
       {
-        cout << ">>>>>>>>>>>>>>>>>>>>>>>>>>" << endl;
-        for (const auto variant: datastore_->get_variants(app_id))
-        {
-          std::cout << "----> " << variant->to_string() << endl;
-        }
-        
         on_stop_(app_id, *departure.first, *departure.second);
         return true;
       }
@@ -127,6 +121,12 @@ public:
       auto upscaling = Upscaling(app_id);
       if (upscaling.first != nullptr)
       {
+
+        if (upscaling.second->percent_occupation(upscaling.first->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY)
+        {
+          throw std::runtime_error("⛔️[auto-scaler] Not enough memory left for " + upscaling.first->to_string() + " at " + upscaling.second->to_string() + "\n\t| New occupancy: " + std::to_string(upscaling.second->percent_occupation(upscaling.first->get_memory())) + " (%)");
+        }
+        std::cout << " ===1=== " + upscaling.first->to_string() + " - " + upscaling.second->to_string() << std::endl;
         on_deploy_(app_id, *upscaling.first, *upscaling.second);
         locker_[app_id] = 5;
         return true;
@@ -137,9 +137,19 @@ public:
 
   std::pair<Model *, Worker *> Upscaling(const string &app_id)
   {
-    std::vector<Worker *> _workers = datastore_->get_workers();
+    std::vector<Worker *> _workers;
+    for (const auto worker : datastore_->get_workers())
+    {
+      if (!worker->is_deploying())
+      {
+        _workers.push_back(worker);
+      }
+    }
     if (_workers.empty())
+    {
+      std::cout << "⚠️ [auto-scaler] No worker found for upscaling." << std::endl;
       return {nullptr, nullptr};
+    }
 
     std::vector<std::string> names;
     for (const auto name : datastore_->get_registered(app_id))

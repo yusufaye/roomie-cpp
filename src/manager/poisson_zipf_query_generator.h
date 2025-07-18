@@ -23,11 +23,12 @@ private:
   std::vector<std::string> domain_;
   std::string path_;
   int qps_;
+  std::map<std::string, int> counter_;
 
 public:
-  void configure(const std::string &path)
+  void configure(const json config)
   {
-    Engine::configure(path);
+    Engine::configure(config);
     auto params = config_["parameters"];
     duration_ = 60.0 * params["duration"].get<float>();
     domain_ = params["domain"];
@@ -63,6 +64,11 @@ public:
                                           { sendQueries(model, timestamps); });
     }
 
+    // DEBUG
+    forward_query_threads_.emplace_back([this]()
+                                        { debug(); });
+    // DEBUG
+
     auto start = std::chrono::steady_clock::now();
     while (std::any_of(forward_query_threads_.begin(), forward_query_threads_.end(), [](std::thread &t)
                        { return t.joinable(); }))
@@ -70,7 +76,7 @@ public:
       std::this_thread::sleep_for(std::chrono::seconds(1));
       auto now = std::chrono::steady_clock::now();
       double elapsed = std::chrono::duration<double>(now - start).count();
-      std::cout << "Progress: " << std::min(elapsed, duration_) << " / " << duration_ << " seconds\r";
+      // std::cout << "Progress: " << std::min(elapsed, duration_) << " / " << duration_ << " seconds\r";
     }
     std::cout << "\n";
 
@@ -100,22 +106,43 @@ private:
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️Error during trace loading: " << e.what() << '\n';
+      std::cerr << "⛔️ Error during trace loading: " << e.what() << '\n';
     }
 
     return data;
   }
 
-  void sendQueries(const std::string &model, std::vector<double> timestamps)
+  void sendQueries(const std::string &app_id, std::vector<double> timestamps)
   {
+    counter_[app_id] = 0;
     std::sort(timestamps.begin(), timestamps.end());
     double time = 0;
     for (const double timestamp : timestamps)
     {
       std::this_thread::sleep_for(std::chrono::duration<double>(timestamp - time));
-      Message msg(std::chrono::system_clock::now().time_since_epoch().count(), "QUERY", {{"app_id", model}});
+      Message msg(std::chrono::system_clock::now().time_since_epoch().count(), "QUERY", {{"app_id", app_id}});
       outgoing_[0]->push(msg);
       time = timestamp;
+      counter_[app_id]++;
+    }
+  }
+
+  void debug()
+  {
+    while (true)
+    {
+      int start_total = 0;
+      int end_total = 0;
+      for (const auto [_, count] : counter_)
+      {
+        start_total += count;
+      }
+      std::this_thread::sleep_for(std::chrono::duration<double>(1));
+      for (const auto [_, count] : counter_)
+      {
+        end_total += count;
+      }
+      // std::cout << "QPS: " + std::to_string(end_total - start_total) << std::endl;
     }
   }
 };
