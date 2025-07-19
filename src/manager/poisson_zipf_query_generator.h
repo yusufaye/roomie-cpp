@@ -38,9 +38,7 @@ public:
 
   void run()
   {
-    std::cout << "--- Poisson - Zipf Query Generator ---\n"
-              << "\tduration: " << duration_ << "sec, qps: " << qps_
-              << ", path: " << path_ << std::endl;
+    spdlog::debug("--- Poisson - Zipf Query Generator ---\n\tduration: {}, path: {}sec, qps: {}", duration_, qps_, path_);
     std::map<std::string, std::string> regis_data;
     for (const auto &name : domain_)
     {
@@ -49,10 +47,11 @@ public:
     Message msg("REGISTER", regis_data);
     outgoing_[0]->push(msg);
 
-    std::cout << "Registering model variants: ";
-    for (const auto &name : domain_)
-      std::cout << name << ", ";
-    std::cout << std::endl;
+    std::string names = "";
+    for (const auto name: domain_) {
+      names += name + ", ";
+    }
+    spdlog::debug("Registering model variants: {}", names);
 
     auto data = loadTrace(path_);
     const int N = domain_.size();
@@ -76,9 +75,8 @@ public:
       std::this_thread::sleep_for(std::chrono::seconds(1));
       auto now = std::chrono::steady_clock::now();
       double elapsed = std::chrono::duration<double>(now - start).count();
-      // std::cout << "Progress: " << std::min(elapsed, duration_) << " / " << duration_ << " seconds\r";
+      // spdlog::debug( "Progress: " << std::min(elapsed, duration_) << " / " << duration_ << " seconds\r";
     }
-    std::cout << "\n";
 
     Message finished_msg("FINISHED");
     outgoing_[0]->push(finished_msg);
@@ -142,7 +140,7 @@ private:
       {
         end_total += count;
       }
-      // std::cout << "QPS: " + std::to_string(end_total - start_total) << std::endl;
+      // spdlog::debug( "QPS: " + std::to_string(end_total - start_total) << std::endl;
     }
   }
 };

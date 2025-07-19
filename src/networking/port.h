@@ -24,7 +24,7 @@ public:
   {
     try
     {
-      std::cout << "[InPort] Host: " + host + ", Port: " + std::to_string(port) << std::endl;
+      spdlog::debug("[InPort] Host: {}, Port: {}" + host, port);
       // Set logging settings
       server_.get_alog().set_channels(websocketpp::log::alevel::none);
 
@@ -33,14 +33,14 @@ public:
 
       // Handle WebSocket connections
       server_.set_open_handler([this](websocketpp::connection_hdl hdl)
-                               { std::cout << "[InPort] Client connected." << std::endl; });
+                               { spdlog::debug("[InPort] Client connected."); });
 
       server_.set_close_handler([this](websocketpp::connection_hdl hdl)
-                                { std::cout << "👋🏻[InPort] Server disconnected." << std::endl; });
+                                { spdlog::debug("👋🏻[InPort] Server disconnected."); });
       server_.set_fail_handler([this](websocketpp::connection_hdl)
                                {
             connected_ = false;
-            std::cerr << "⛔️[InPort] Connection failed to host " + host_ + " and port " + std::to_string(port_) << std::endl; });
+            spdlog::error("⛔️[InPort] Connection failed to host {} and port {}" ,host_ ,port_); });
       server_.set_message_handler([this](websocketpp::connection_hdl hdl, server::message_ptr msg)
                                   { message_queue_.push(msg->get_payload()); });
 
@@ -58,19 +58,22 @@ public:
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️[InPort] Error while trying to set input connection at host: " + host_ +
-                       " and port: " + std::to_string(port_) + "\n\t"
-                << e.what() << '\n';
+      spdlog::error("⛔️[InPort] Error while trying to set input connection at host: {}, and port: {}", host_, port_, e.what());
     }
   }
 
   ~InPort()
   {
-    if (consumer_thread_.joinable())
-      consumer_thread_.join();
-    if (server_thread_.joinable())
-      server_thread_.join();
     server_.stop();
+    message_queue_.push(""); // Empty string signals shutdown
+    if (consumer_thread_.joinable())
+    {
+      consumer_thread_.join();
+    }
+    if (server_thread_.joinable())
+    {
+      server_thread_.join();
+    }
   }
 
   std::string to_string() const
@@ -90,13 +93,13 @@ private:
     while (true)
     {
       data = message_queue_.pop();
-      Message message;
-      message.deserialize(data);
-      callback_(message);
-      if (message.getType() == "FINISHED")
+      if (data.empty())
       {
         break;
       }
+      Message message;
+      message.deserialize(data);
+      callback_(message);
     }
   }
 
@@ -117,7 +120,7 @@ public:
       : id_(id), remote_host_(remote_host), remote_port_(remote_port),
         client_()
   {
-    std::cout << "[OutPort] Host: " + remote_host + ", Port: " + std::to_string(remote_port) << std::endl;
+    spdlog::debug("[OutPort] Host: {}, Port: {}", remote_host, remote_port);
 
     // Set logging to be pretty verbose (everything except message payloads)
     client_.get_alog().set_channels(websocketpp::log::alevel::none);
@@ -132,22 +135,22 @@ public:
         this->hdl_ = hdl;
         connected_ = true;
         runner_thread_ = std::thread(&OutPort::run, this);
-        std::cout << "✅[OutPort] Connected successfully!" << std::endl; });
+        spdlog::debug("✅[OutPort] Connected successfully!"); });
     // Handle WebSocket connections
 
     client_.set_close_handler([&](websocketpp::connection_hdl hdl)
-                              { std::cout << "👋🏻[OutPort] Client disconnected." << std::endl; });
+                              { spdlog::debug("👋🏻[OutPort] Client disconnected."); });
 
     client_.set_message_handler([this](websocketpp::connection_hdl hdl, client::message_ptr msg)
                                 {
                                   Message message(msg->get_payload());
-                                  std::cout << "[OutPort] Received message" << message.to_string() << std::endl;
+                                  spdlog::debug("[OutPort] Received message: {}", message.to_string());
                                   // Handle message
                                 });
     client_.set_fail_handler([this](websocketpp::connection_hdl)
                              {
             connected_ = false;
-            std::cerr << "⛔️[OutPort] Connection failed to host " + remote_host_ + " and port " + std::to_string(remote_port_) + ". Retrying...\n";
+            spdlog::error("⛔️[OutPort] Connection failed to host {} and port {}\n\tRetrying...", remote_host_ ,remote_port_);
             schedule_retry(); });
 
     connect();
@@ -160,13 +163,17 @@ public:
 
   ~OutPort()
   {
-    if (runner_thread_.joinable())
-      runner_thread_.join();
-    if (client_thread_.joinable())
-      client_thread_.join();
     Message message("FINISHED");
     message_queue_.push(message); // Empty string signals shutdown
     client_.stop();
+    if (runner_thread_.joinable())
+    {
+      runner_thread_.join();
+    }
+    if (client_thread_.joinable())
+    {
+      client_thread_.join();
+    }
   }
 
   void connect()
@@ -175,7 +182,7 @@ public:
     client::connection_ptr con = client_.get_connection(url_, ec);
     if (ec)
     {
-      std::cerr << "Could not create connection: " << ec.message() << "\n";
+      spdlog::error("Could not create connection: {}", ec.message());
       return;
     }
     client_.connect(con);
@@ -185,7 +192,7 @@ public:
   {
     if (retry_count_ >= max_retries_)
     {
-      std::cerr << "⛔️ Max retries reached. Giving up.\n";
+      spdlog::error("⛔️ Max retries reached. Giving up.");
       return;
     }
     retry_count_++;
@@ -239,9 +246,9 @@ private:
         }
       }
     }
-    catch(const std::exception& e)
+    catch (const std::exception &e)
     {
-      std::cerr << "⛔️ Connection lost\n\t" << e.what() << '\n';
+      spdlog::error("⛔️ Connection lost\n\t{}", e.what());
     }
   }
 

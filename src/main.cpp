@@ -1,6 +1,9 @@
 #include <unistd.h>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include "manager/engine.h"
 #ifdef CUDA_AVAILABLE
 #include "manager/worker.h"
@@ -17,7 +20,12 @@ namespace fs = std::filesystem;
 
 int main(int argc, char const *argv[])
 {
-  Engine *engine;
+  auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+  console_sink->set_color_mode(spdlog::color_mode::always);
+  auto logger = std::make_shared<spdlog::logger>("roomie", console_sink);
+  spdlog::set_default_logger(logger);
+  spdlog::set_level(spdlog::level::debug);
+
   if (argc > 1)
   {
     std::string path = argv[1];
@@ -30,12 +38,14 @@ int main(int argc, char const *argv[])
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️ Error loading configuration" << "\n\t" << e.what() << '\n';
+      spdlog::error("{} {} {}", "⛔️ Error loading configuration", "\n\t", e.what());
       return 1;
     }
     std::string type = config["type"];
 
-    std::cout << "⚠️[" + type + "] About to load configuration from " + "'" + path + "'" << std::endl;
+    spdlog::info("[{}] About to load configuration from '{}'", type, path);
+    // std::cout << "⚠️[" + type + "] About to load configuration from " + "'" + path + "'" << std::endl;
+    Engine *engine;
     if (type == "PoissonZipfQueryGenerator")
     {
       engine = new PoissonZipfQueryGenerator();
@@ -52,7 +62,7 @@ int main(int argc, char const *argv[])
 #endif
     else
     {
-      std::cerr << "⛔️[ERROR] Please provide a valide engine, given is " << type << std::endl;
+      spdlog::error("⛔️[ERROR] Please provide a valide engine, given is {}", type);
       exit(1);
     }
     engine->configure(config);
@@ -60,7 +70,7 @@ int main(int argc, char const *argv[])
   }
   else
   {
-    std::cerr << "⛔️[ERROR] Please provide a valide option" << std::endl;
+    spdlog::error("⛔️[ERROR] Please provide a valide option");
     exit(1);
   }
   return 0;

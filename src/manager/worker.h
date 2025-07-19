@@ -7,6 +7,10 @@
 #include <vector>
 #include <thread>
 #include <fstream>
+#include <spdlog/async.h>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include <torch/script.h>
 #include <cuda_runtime.h>
 #include <condition_variable>
@@ -15,6 +19,7 @@
 #include "engine.h"
 #include "utils/queue.h"
 #include "utils/datastore.h"
+#include "utils/csv_writer.h"
 #include "networking/port.h"
 #include "networking/message.h"
 
@@ -31,12 +36,12 @@ public:
     device_ = new torch::Device(torch::kCUDA, device_index_);
     device_index_ = config_["parameters"]["device"].get<int>();
     hardware_platform_ = config_["parameters"]["hardware_platform"];
-    std::cout << "👉[WORKER] Given device is " << device_index_ << " 👈" << std::endl;
+    spdlog::debug("👉[WORKER] Given device is {}👈", device_index_);
   }
 
   void run() override
   {
-    std::cout << "RUNNING WORKER..." << std::endl;
+    spdlog::debug("RUNNING WORKER...");
     std::thread registration_thread(&WorkerEngine::deployment_daemon, this);
     std::thread monitor_thread(&WorkerEngine::monitor_daemon, this);
     std::thread monitor_incoming_thread(&WorkerEngine::monitor_incoming_data, this);
@@ -47,7 +52,7 @@ public:
 
   void push(const Message &msg) override
   {
-    // std::cout << "👉[WORKER] Recv: " << msg.to_string() << std::endl;
+    // spdlog::debug( "👉[WORKER] Recv: " << msg.to_string() << std::endl;
     if (msg.getType() == "DEPLOY")
     {
       deployment_queue_.push(msg);
@@ -66,16 +71,24 @@ public:
     }
     else if (msg.getType() == "HELLO")
     {
-      std::cout << "👉[WORKER] Hello messge received: " << msg.to_string() << std::endl;
+      spdlog::debug("👉[WORKER] Hello messge received: {}", msg.to_string());
       id_ = std::stoi(msg.get_data()["worker_id"]);
       engine_name_ = "WorkerEngine-" + msg.get_data()["worker_id"];
       size_t free_memory;
       size_t total_memory;
       cudaMemGetInfo(&free_memory, &total_memory);
-      std::cout << "Total memory: " << total_memory / (1024.0 * 1024) << " MB | Free memory: " << free_memory / (1024.0 * 1024) << " MB" << std::endl;
+      spdlog::debug("Total memory: {} MB | Free memory: {} MB", total_memory / (1024.0 * 1024), free_memory / (1024.0 * 1024));
       total_mem_ = total_memory;
       Message hello_msg("HELLO", {{"worker_id", msg.get_data()["worker_id"]}, {"total_mem", std::to_string(total_mem_)}});
       outgoing_[0]->push(hello_msg);
+
+      std::string logpath = config_["parameters"]["log_dir"].get<std::string>() + "_worker_" + std::to_string(id_) + ".csv";
+      // Create a logger
+      async_file = spdlog::basic_logger_mt<spdlog::async_factory>("async_file_logger", logpath, true);
+      // Set a custom format string
+      async_file->set_pattern("%v");
+      async_file->set_level(spdlog::level::debug);
+      async_file->debug("{},{},{},{},{}", "timestamp", "worker_id", "variant_id", "variant_name", "batch_size");
     }
   }
 
@@ -124,12 +137,12 @@ public:
         std::map<std::string, std::string> data = {{"worker_id", std::to_string(id_)}, {"variants", j.dump()}};
         Message msg("PROFILE_DATA", data);
         outgoing_[0]->push(msg);
-        // std::cout << "👉[WORKER] Monitoring with " + msg.to_string() << std::endl;
+        // spdlog::debug( "👉[WORKER] Monitoring with " + msg.to_string() << std::endl;
       }
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️ Error with monitor daemon\n\t" << e.what() << '\n';
+      spdlog::error("⛔️ Error with monitor daemon\n\t{}", e.what());
     }
   }
 
@@ -140,7 +153,7 @@ public:
       while (true)
       {
         auto msg = deployment_queue_.pop(); // blocks until message arrives
-        // std::cout << "👉[WORKER] About to deploy " << msg.to_string() << std::endl;
+        // spdlog::debug( "👉[WORKER] About to deploy " << msg.to_string() << std::endl;
         Model *model = new Model();
         model->id = std::stoi(msg.get_data()["id"]);
         model->name = msg.get_data()["name"];
@@ -155,7 +168,7 @@ public:
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️ Error with profiling daemon\n\t" << e.what() << '\n';
+      spdlog::error("⛔️ Error with profiling daemon\n\t{}", e.what());
     }
   }
 
@@ -163,7 +176,7 @@ public:
   {
     try
     {
-      string model_filename = "src/data/models/" + model->name + ".pt";
+      string model_filename = "data/models/" + model->name + ".pt";
 
       c10::cuda::CUDAStream stream = c10::cuda::getStreamFromPool(/* isHighPriority = */ true, /* device_index = */ 0);
       c10::cuda::setCurrentCUDAStream(stream);
@@ -178,7 +191,7 @@ public:
       size_t free_memory;
       size_t total_memory;
       cudaMemGetInfo(&free_memory, &total_memory);
-      std::cout << "⚠️ [worker] New deployment\n\t| Name: " + model->name + "\n\t| Batch-size: " + std::to_string(model->batch_size) + "\n\t| Free-memory: " + std::to_string(free_memory / (1024.0 * 1024)) + " MB" << std::endl;
+      spdlog::debug("⚠️ [worker] New deployment\n\t| Name: {}\n\t| Batch-size: {}\n\t| Free-memory: {} MB", model->name, model->batch_size, free_memory / (1024.0 * 1024));
       Message msg("DEPLOYED", {{"worker_id", std::to_string(id_)}, {"free_memory", std::to_string(free_memory)}, {"total_memory", std::to_string(total_memory)}});
       outgoing_[0]->push(msg);
       while (true)
@@ -188,7 +201,7 @@ public:
           data = queue->pop();
           if (data == 0)
           {
-            std::cout << "⚠️ [worker] About to stop | Name: " + model->name + ", batch-size: " + std::to_string(model->batch_size) << std::endl;
+            spdlog::debug("⚠️ [worker] About to stop | Name: {}, batch-size: {}", model->name, model->batch_size);
             return;
           }
           startTime = chrono::high_resolution_clock::now();
@@ -196,21 +209,34 @@ public:
           // std::this_thread::sleep_for(std::chrono::milliseconds(100)); // [TODO] Debug purpose.
           endTime = chrono::high_resolution_clock::now();
           model->set_throughput(model->batch_size / std::chrono::duration_cast<std::chrono::duration<double>>(endTime - startTime).count());
+          async_file->debug("{},{},{},{},{}",
+                            std::chrono::system_clock::to_time_t(endTime),
+                            id_,
+                            model->id,
+                            model->name,
+                            model->batch_size);
+          spdlog::debug("Inference: worker-id={}, id={}, name={}, thr={}",
+                            id_,
+                            model->id,
+                            model->name,
+                            model->batch_size);
         }
         catch (const std::exception &e)
         {
-          std::cerr << e.what() << '\n';
+          spdlog::error("⛔️ Error during inference\n\t{}", e.what());
         }
       }
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️ Error initializing model\n\t" << e.what() << '\n';
+      spdlog::error("⛔️ Error initializing model\n\t{}", e.what());
     }
   }
 
 private:
   Event event_;
+  CSVWriter *csv_writter_;
+  std::shared_ptr<spdlog::logger> async_file;
   // Queues and data
   std::map<std::string, BlockingQueue<int> *> inference_queue_;
   std::map<std::string, int> num_received_;

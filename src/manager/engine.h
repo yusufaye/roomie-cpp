@@ -70,7 +70,7 @@ public:
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️[ENGINE]-run: " << e.what() << std::endl;
+      spdlog::error("⛔️[ENGINE]-run: {}", e.what());
       fs::remove(log_directory_);
       throw e;
     }

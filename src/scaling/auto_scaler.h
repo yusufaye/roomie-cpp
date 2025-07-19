@@ -33,7 +33,7 @@ public:
   void run()
   {
     event_.wait();
-    std::cout << "😎 [auto-scaler] About to start the auto-scaling." << std::endl;
+    spdlog::debug( "😎 [auto-scaler] About to start the auto-scaling." );
 
     // Start monitoring loop
     while (true)
@@ -78,7 +78,7 @@ public:
           most_overloaded_app = {app_id, ratio};
         }
 
-        // std::cout << "🔵 [auto-scaler] For " + app_id + " Load=" + std::to_string(workload) + ", Thr=" + std::to_string(throughput) + ", Ratio=" + std::to_string(ratio) << std::endl;
+        // spdlog::debug( "🔵 [auto-scaler] For " + app_id + " Load=" + std::to_string(workload) + ", Thr=" + std::to_string(throughput) + ", Ratio=" + std::to_string(ratio) << std::endl;
       }
 
       auto [app_id, ratio] = most_overloaded_app;
@@ -126,7 +126,6 @@ public:
         {
           throw std::runtime_error("⛔️[auto-scaler] Not enough memory left for " + upscaling.first->to_string() + " at " + upscaling.second->to_string() + "\n\t| New occupancy: " + std::to_string(upscaling.second->percent_occupation(upscaling.first->get_memory())) + " (%)");
         }
-        std::cout << " ===1=== " + upscaling.first->to_string() + " - " + upscaling.second->to_string() << std::endl;
         on_deploy_(app_id, *upscaling.first, *upscaling.second);
         locker_[app_id] = 5;
         return true;
@@ -147,7 +146,7 @@ public:
     }
     if (_workers.empty())
     {
-      std::cout << "⚠️ [auto-scaler] No worker found for upscaling." << std::endl;
+      spdlog::debug( "⚠️ [auto-scaler] No worker found for upscaling." );
       return {nullptr, nullptr};
     }
 

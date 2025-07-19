@@ -34,7 +34,7 @@ public:
   void configure(const json config)
   {
     Engine::configure(config);
-    
+
     if (config_["parameters"]["scheduling"] == "INFaaSSchaduling")
     {
       scheduler_ = new INFaaSScheduler();
@@ -61,7 +61,7 @@ public:
 
   void run() override
   {
-    std::cout << "RUNNING CONTROLLER..." << std::endl;
+    spdlog::debug("RUNNING CONTROLLER...");
 
     // Send HELLO messages to all outports
     for (auto &outport : outgoing_)
@@ -89,7 +89,7 @@ public:
 
   void push(const Message &msg) override
   {
-    // std::cout << "👉[controller] Recv " + msg.to_string() << std::endl;
+    // spdlog::debug("👉[controller] Recv " + msg.to_string() );
     if (msg.getType() == "REGISTER")
     {
       registration_queue_.push(msg);
@@ -108,7 +108,7 @@ public:
       double total_mem = std::stod(msg.get_data()["total_mem"]);
       Worker *worker = datastore_.get_worker(worker_id);
       worker->set_total_memory(total_mem / 2);
-      std::cout << "👉[controller] Update for " + worker->to_string() << std::endl;
+      spdlog::debug("👉[controller] Update for {}", worker->to_string());
       event_.set();
     }
     else if (msg.getType() == "DEPLOYED")
@@ -117,7 +117,7 @@ public:
       double free_memory = std::stod(msg.get_data()["free_memory"]);
       Worker *worker = datastore_.get_worker(worker_id);
       worker->set_deployment(false);
-      std::cout << "👉[controller] Deployment done for " + worker->to_string() << std::endl;
+      spdlog::debug("👉[controller] Deployment done for " + worker->to_string());
       event_.set();
     }
   }
@@ -127,15 +127,15 @@ public:
     try
     {
       event_.wait();
-      std::cout << "👉[controller] About to run registration daemon" << std::endl;
+      spdlog::debug("👉[controller] About to run registration daemon");
       while (true)
       {
         Message msg = registration_queue_.pop(); // blocks until message arrives
-        std::cout << "👉[controller] New registration " << msg.to_string() << std::endl;
+        spdlog::debug("👉[controller] New registration {}", msg.to_string());
         std::map<std::string, std::string> variant_names = msg.get_data(); // assumed typed extraction
         for (auto &[app_id, variant_name] : variant_names)
         {
-          std::cout << "👉[controller] About to register app " << app_id << std::endl;
+          spdlog::debug("👉[controller] About to register app {}", app_id);
           datastore_.register_app(variant_name, variant_name);
           std::vector<Worker *> workers = datastore_.get_workers();
           std::vector<std::string> names;
@@ -150,7 +150,7 @@ public:
                                               {
                                                 query_daemon(variant_name); // starts query loop per variant
                                               });
-          std::cout << "👉[controller] Registered app " << app_id << std::endl;
+          spdlog::debug("👉[controller] Registered app {}", app_id);
         }
 
         autoscaler_->set_event();
@@ -158,7 +158,7 @@ public:
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️ Error with registration daemon\n\t" << e.what() << '\n';
+      spdlog::error("⛔️ Error with registration daemon\n\t{}", e.what());
     }
   }
 
@@ -200,7 +200,7 @@ public:
     }
     catch (const std::exception &e)
     {
-      std::cerr << "⛔️ Error with profiling daemon\n\t" << e.what() << '\n';
+      spdlog::error("⛔️ Error with profiling daemon\n\t{}", e.what());
     }
   }
 
@@ -221,7 +221,7 @@ public:
         double throughput = variant->compute_throughput();
         if (throughput == 0)
         {
-          std::cerr << "Warning: Zero throughput for variant " << variant->id << std::endl;
+          spdlog::error("Warning: Zero throughput for variant {}", variant->id);
           continue;
         }
         raw_weights.push_back(variant->compute_workload() / throughput);
@@ -247,7 +247,7 @@ public:
         loadb_.set(app_id, key, weights[i]);
       }
     }
-    // std::cout << "👉[controller] Updated load-balancing: " + loadb_.to_string() << std::endl;
+    // spdlog::debug("👉[controller] Updated load-balancing: " + loadb_.to_string() );
   }
 
   void deploy(const std::string &app_id, Model &variant, Worker &worker)
@@ -269,7 +269,7 @@ public:
     // worker.add_variant(&variant);
     if (datastore_.push(worker.get_id(), &variant) == nullptr)
     {
-      std::cerr << "⛔️ Error adding variant to worker" << std::endl;
+      spdlog::error("⛔️ Error adding variant to worker");
     }
   }
 
@@ -282,7 +282,7 @@ public:
     Message msg("STOP", data);
     send(worker, msg);
     datastore_.remove(worker.get_id(), &variant);
-    std::cout << "👉[controller] Will stop " << variant.to_string() << " at " << worker.to_string() << std::endl;
+    spdlog::debug("👉[controller] Will stop {} at {}", variant.to_string(), worker.to_string());
   }
 
   void send(Worker &worker, const Message &msg)
@@ -292,7 +292,7 @@ public:
 
   void query_daemon(const std::string &app_id)
   {
-    std::cout << "😎 Query forwarder will start for application " + app_id << std::endl;
+    spdlog::debug("😎 Query forwarder will start for application " + app_id);
     while (true)
     {
       std::optional<std::string> key = loadb_.next(app_id);
@@ -307,11 +307,10 @@ public:
         Message msg("QUERY", {{"variant_id", std::to_string(variant->id)}, {"batch_size", std::to_string(variant->batch_size)}});
         msg.append_data("variant_id", std::to_string(variant->id));
         send(*worker, msg);
-        // std::cout << "⚪️Forward query" << std::endl;
       }
       else
       {
-        std::cerr << "⚠️ No variant instance found for the application " << app_id << std::endl;
+        spdlog::error("No variant instance found for the application {}", app_id);
         std::this_thread::sleep_for(std::chrono::seconds(1));
       }
     }
@@ -322,7 +321,6 @@ private:
   LoadBalancer loadb_;
   Scheduler *scheduler_;
   AutoScaler *autoscaler_;
-  Approach approach_;
   DataStore datastore_;
   InPort *incoming2_;
   std::map<int, OutPort *> networking_;

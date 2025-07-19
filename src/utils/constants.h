@@ -8,7 +8,7 @@ const int MAX_GPU_MEMORY_OCCUPANCY = 90;
 
 const int BATCH_SIZES[3] = { 32, 64, 128 };
 
-const std::string WORKDIR = "src/";
+const std::string WORKDIR = "";
 
 
 #endif  // CONSTANT_H

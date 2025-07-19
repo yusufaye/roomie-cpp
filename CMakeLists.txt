@@ -26,7 +26,7 @@ project(Roomie)
 
 # Find NumCpp
 find_package(Threads REQUIRED)
-
+find_package(spdlog REQUIRED)
 
 # Add src directory
 add_subdirectory(src)
