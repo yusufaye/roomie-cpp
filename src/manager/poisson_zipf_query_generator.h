@@ -90,7 +90,7 @@ private:
     std::unordered_map<int, std::vector<double>> data;
     try
     {
-      io::CSVReader<2> in(filepath);
+      io::CSVReader<2> in(WORKDIR + filepath);
       in.read_header(io::ignore_extra_column, "timestamp", "model");
       float timestamp;
       int idx;
@@ -140,7 +140,7 @@ private:
       {
         end_total += count;
       }
-      // spdlog::debug( "QPS: " + std::to_string(end_total - start_total) << std::endl;
+      // spdlog::debug( "QPS: {}", end_total - start_total );
     }
   }
 };

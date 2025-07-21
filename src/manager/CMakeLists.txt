@@ -1,5 +1,3 @@
-option(ENABLE_CUDA "Enable CUDA support" ON)
-
 # Find CUDA
 find_package(CUDA)
 
@@ -7,7 +5,7 @@ find_package(CUDA)
 find_package(nlohmann_json REQUIRED)
 
 # Check if build for CUDA available env.
-if(CUDA_FOUND OR ENABLE_CUDA)
+if(CUDA_FOUND)
   # Find libtorch
   find_package(Torch REQUIRED HINTS /usr/local/libtorch/libtorch)
 

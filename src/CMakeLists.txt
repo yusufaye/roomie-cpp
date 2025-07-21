@@ -1,10 +1,8 @@
-option(ENABLE_CUDA "Enable CUDA support" ON)
-
 # Find CUDA
 find_package(CUDA)
 
 # Set the executable name based on CUDA availability§/L.
-if(CUDA_FOUND OR ENABLE_CUDA)
+if(CUDA_FOUND)
   set(EXECUTABLE_NAME "${PROJECT_NAME}_CUDA")
   add_definitions(-DCUDA_AVAILABLE)
 else()

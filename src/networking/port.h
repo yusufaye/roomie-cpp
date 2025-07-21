@@ -31,23 +31,26 @@ public:
       // Initialize Asio
       server_.init_asio();
 
-      // Handle WebSocket connections
-      server_.set_open_handler([this](websocketpp::connection_hdl hdl)
-                               { spdlog::debug("[InPort] Client connected."); });
-
       server_.set_close_handler([this](websocketpp::connection_hdl hdl)
                                 { spdlog::debug("👋🏻[InPort] Server disconnected."); });
+
       server_.set_fail_handler([this](websocketpp::connection_hdl)
                                {
             connected_ = false;
             spdlog::error("⛔️[InPort] Connection failed to host {} and port {}" ,host_ ,port_); });
+
       server_.set_message_handler([this](websocketpp::connection_hdl hdl, server::message_ptr msg)
                                   { message_queue_.push(msg->get_payload()); });
 
+      // Handle WebSocket connections
       server_.set_open_handler([this](websocketpp::connection_hdl)
-                               { connected_ = true; });
+                               {
+                                connected_ = true;
+                                spdlog::debug("✅[InPort] Client connected to ws://{}:{}.", host_, port_); });
 
-      server_.listen(port);
+      boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address_v4::from_string("0.0.0.0"), port_);
+      server_.listen(endpoint);
+
       // Start the server accept loop
       server_.start_accept();
 
@@ -89,17 +92,19 @@ public:
 private:
   void run()
   {
-    std::string data;
+    std::string message;
     while (true)
     {
-      data = message_queue_.pop();
-      if (data.empty())
+      message = message_queue_.pop();
+      // spdlog::debug("✉️ {}", message);
+
+      if (message.empty())
       {
         break;
       }
-      Message message;
-      message.deserialize(data);
-      callback_(message);
+      Message msg;
+      msg.deserialize(message);
+      callback_(msg);
     }
   }
 
@@ -126,7 +131,7 @@ public:
     client_.get_alog().set_channels(websocketpp::log::alevel::none);
 
     // ex. "ws://localhost:9002"
-    url_ = "ws://" + remote_host + ":" + std::to_string(remote_port);
+    uri_ = "ws://" + remote_host + ":" + std::to_string(remote_port);
 
     // Initialize ASIO
     client_.init_asio();
@@ -135,7 +140,7 @@ public:
         this->hdl_ = hdl;
         connected_ = true;
         runner_thread_ = std::thread(&OutPort::run, this);
-        spdlog::debug("✅[OutPort] Connected successfully!"); });
+        spdlog::debug("✅[OutPort] Connected successfully to {}!", uri_); });
     // Handle WebSocket connections
 
     client_.set_close_handler([&](websocketpp::connection_hdl hdl)
@@ -144,13 +149,11 @@ public:
     client_.set_message_handler([this](websocketpp::connection_hdl hdl, client::message_ptr msg)
                                 {
                                   Message message(msg->get_payload());
-                                  spdlog::debug("[OutPort] Received message: {}", message.to_string());
-                                  // Handle message
-                                });
+                                  spdlog::debug("[OutPort] Received message: {}", message.to_string()); });
     client_.set_fail_handler([this](websocketpp::connection_hdl)
                              {
             connected_ = false;
-            spdlog::error("⛔️[OutPort] Connection failed to host {} and port {}\n\tRetrying...", remote_host_ ,remote_port_);
+            spdlog::error("⛔️[OutPort] Connection failed to host {} and port {}\n\tRetrying in 3 seconds...", remote_host_ ,remote_port_);
             schedule_retry(); });
 
     connect();
@@ -166,6 +169,11 @@ public:
     Message message("FINISHED");
     message_queue_.push(message); // Empty string signals shutdown
     client_.stop();
+    join();
+  }
+
+  void join()
+  {
     if (runner_thread_.joinable())
     {
       runner_thread_.join();
@@ -175,11 +183,11 @@ public:
       client_thread_.join();
     }
   }
-
+  
   void connect()
   {
     websocketpp::lib::error_code ec;
-    client::connection_ptr con = client_.get_connection(url_, ec);
+    client::connection_ptr con = client_.get_connection(uri_, ec);
     if (ec)
     {
       spdlog::error("Could not create connection: {}", ec.message());
@@ -255,7 +263,7 @@ private:
   std::string remote_host_;
   int remote_port_;
   int id_;
-  std::string url_;
+  std::string uri_;
   client client_;
   bool connected_;
   BlockingQueue<Message> message_queue_; // Not thread-safe!  std::mutex queue_mutex_;

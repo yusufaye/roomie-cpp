@@ -15,6 +15,7 @@
 #include "networking/port.h"
 #include "networking/message.h"
 
+
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
@@ -38,7 +39,7 @@ int main(int argc, char const *argv[])
     }
     catch (const std::exception &e)
     {
-      spdlog::error("{} {} {}", "⛔️ Error loading configuration", "\n\t", e.what());
+      spdlog::error("⛔️ Error loading configuration from {}\n\t{}", path, e.what());
       return 1;
     }
     std::string type = config["type"];

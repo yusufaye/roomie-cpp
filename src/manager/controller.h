@@ -66,7 +66,7 @@ public:
     // Send HELLO messages to all outports
     for (auto &outport : outgoing_)
     {
-      Message msg("HELLO", {{"worker_id", std::to_string(outport->getId())}});
+      Message msg("HELLO", {{"worker_id", outport->getId()}});
       outport->push(msg);
     }
 
@@ -89,7 +89,7 @@ public:
 
   void push(const Message &msg) override
   {
-    // spdlog::debug("👉[controller] Recv " + msg.to_string() );
+    // spdlog::debug("✉️ [controller] Recv " + msg.to_string() );
     if (msg.getType() == "REGISTER")
     {
       registration_queue_.push(msg);
@@ -104,21 +104,36 @@ public:
     }
     else if (msg.getType() == "HELLO")
     {
-      int worker_id = std::stoi(msg.get_data()["worker_id"]);
-      double total_mem = std::stod(msg.get_data()["total_mem"]);
-      Worker *worker = datastore_.get_worker(worker_id);
-      worker->set_total_memory(total_mem / 2);
-      spdlog::debug("👉[controller] Update for {}", worker->to_string());
-      event_.set();
+      try
+      {
+        std::cout << "✉️ [controller] Recv " << msg.get_data() << std::endl;
+        int worker_id = msg.get_data()["worker_id"];
+        double total_mem = msg.get_data()["total_mem"];
+        Worker *worker = datastore_.get_worker(worker_id);
+        worker->set_total_memory(total_mem / 2);
+        spdlog::debug("👉[controller] Update for {}", worker->to_string());
+        event_.set();
+      }
+      catch (const std::exception &e)
+      {
+        spdlog::error("⛔️ Error on hello replay\n\t{}", e.what());
+      }
     }
     else if (msg.getType() == "DEPLOYED")
     {
-      int worker_id = std::stoi(msg.get_data()["worker_id"]);
-      double free_memory = std::stod(msg.get_data()["free_memory"]);
-      Worker *worker = datastore_.get_worker(worker_id);
-      worker->set_deployment(false);
-      spdlog::debug("👉[controller] Deployment done for " + worker->to_string());
-      event_.set();
+      try
+      {
+        int worker_id = msg.get_data()["worker_id"];
+        double free_memory = msg.get_data()["free_memory"];
+        Worker *worker = datastore_.get_worker(worker_id);
+        worker->set_deployment(false);
+        spdlog::debug("👉[controller] Deployment done for " + worker->to_string());
+        event_.set();
+      }
+      catch (const std::exception &e)
+      {
+        spdlog::error("⛔️ Error on deployed replay\n\t{}", e.what());
+      }
     }
   }
 
@@ -170,13 +185,12 @@ public:
       {
         auto msg = profiling_queue_.pop(); // [TODO] Update load balancing weights.
 
-        int worker_id = std::stoi(msg.get_data()["worker_id"]);
-        json j = json::parse(msg.get_data()["variants"]);
+        int worker_id = msg.get_data()["worker_id"];
         for (auto worker : datastore_.get_workers())
         {
           if (worker->get_id() == worker_id)
           {
-            for (const auto &item : j)
+            for (const auto &item : msg.get_data()["variants"])
             {
               for (auto variant : worker->get_variants())
               {
@@ -275,11 +289,7 @@ public:
 
   void stop(const std::string &app_id, Model &variant, Worker &worker)
   {
-    std::map<std::string, std::string> data = {
-        {"variant_id", std::to_string(variant.id)},
-        {"variant_name", variant.name},
-    };
-    Message msg("STOP", data);
+    Message msg("STOP", {{"variant_id", variant.id}, {"variant_name", variant.name}});
     send(worker, msg);
     datastore_.remove(worker.get_id(), &variant);
     spdlog::debug("👉[controller] Will stop {} at {}", variant.to_string(), worker.to_string());
@@ -304,8 +314,7 @@ public:
         {
           query_queue_[app_id].pop(); // blocking wait on a per-app queue
         }
-        Message msg("QUERY", {{"variant_id", std::to_string(variant->id)}, {"batch_size", std::to_string(variant->batch_size)}});
-        msg.append_data("variant_id", std::to_string(variant->id));
+        Message msg("QUERY", {{"variant_id", variant->id}, {"batch_size", variant->batch_size}});
         send(*worker, msg);
       }
       else

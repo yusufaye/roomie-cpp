@@ -18,6 +18,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include "engine.h"
 #include "utils/queue.h"
+#include "utils/constants.h"
 #include "utils/datastore.h"
 #include "utils/csv_writer.h"
 #include "networking/port.h"
@@ -52,7 +53,7 @@ public:
 
   void push(const Message &msg) override
   {
-    // spdlog::debug( "👉[WORKER] Recv: " << msg.to_string() << std::endl;
+    spdlog::debug("✉️[WORKER] Recv: {}", msg.to_string());
     if (msg.getType() == "DEPLOY")
     {
       deployment_queue_.push(msg);
@@ -123,7 +124,6 @@ public:
       while (true)
       {
         std::this_thread::sleep_for(std::chrono::seconds(5));
-        std::vector<std::string> items;
         json j;
         for (const auto [_, variant] : running_variant_)
         {
@@ -176,7 +176,7 @@ public:
   {
     try
     {
-      string model_filename = "data/models/" + model->name + ".pt";
+      string model_filename = WORKDIR + "data/models/" + model->name + ".pt";
 
       c10::cuda::CUDAStream stream = c10::cuda::getStreamFromPool(/* isHighPriority = */ true, /* device_index = */ 0);
       c10::cuda::setCurrentCUDAStream(stream);
@@ -216,10 +216,10 @@ public:
                             model->name,
                             model->batch_size);
           spdlog::debug("Inference: worker-id={}, id={}, name={}, thr={}",
-                            id_,
-                            model->id,
-                            model->name,
-                            model->batch_size);
+                        id_,
+                        model->id,
+                        model->name,
+                        model->batch_size);
         }
         catch (const std::exception &e)
         {

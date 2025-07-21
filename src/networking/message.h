@@ -46,17 +46,17 @@ public:
     Message(const std::string &type)
         : type_(type) {}
 
-    Message(const std::string &type, const std::map<std::string, std::string> &data)
+    Message(const std::string &type, const json &data)
         : type_(type), data_(data)
     {
     }
 
-    Message(const float timestamp, const std::string &type, const std::map<std::string, std::string> &data)
+    Message(const float timestamp, const std::string &type, const json &data)
         : timestamp_(timestamp), type_(type), data_(data) {}
 
     float getTimestamp() const { return timestamp_; }
     std::string getType() const { return type_; }
-    std::map<std::string, std::string> get_data() const { return data_; }
+    json get_data() const { return data_; }
 
     void append_data(std::string key, std::string value)
     {
@@ -75,26 +75,21 @@ public:
         auto j = json::parse(s);
         
         // convert from JSON: copy each value from the JSON object
-        data_       = j["data"].get<std::map<std::string, std::string>>();
+        data_       = j["data"];
         type_       = j["type"].get<std::string>();
         timestamp_  = j["timestamp"].get<float>();
     }
 
     std::string to_string() const
     {
-        std::string data_format = "[";
-        for (const auto &[key, value]: data_)
-            data_format += "'" + key + "': " + value + ", ";
-        data_format += "]";
         return "Message('timestamp': " + std::to_string(timestamp_) +
-               ", 'type': " + type_ +
-               ", 'data': " + data_format + ")";
+               ", 'type': " + type_ + ")";
     }
 
 private:
     float timestamp_ = 0.0;
     std::string type_;
-    std::map<std::string, std::string> data_;
+    json data_;
 };
 
 #endif // MESSAGE_H
