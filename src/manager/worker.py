@@ -1,24 +1,43 @@
-try:
-  import torch
-except ImportError:
-  pass
-
 import os
+import time
+import queue
+import aiocsv
+import logging
 import asyncio
 import logging
-from typing import Dict, List
-
-import logging
-import time
+import aiofiles
+import warnings
 try:
   import torch
 except: pass
-import queue
-import asyncio
-import warnings
+from typing import Dict, List, Any
+
 from networking.message import Message
 from networking.port import OutPort, InPort
 warnings.simplefilter(action="ignore", category=FutureWarning)
+
+
+class Logger:
+  def __init__(self, directory: str, filename: str) -> None:
+    self.filename   = filename
+    self.directory  = directory
+    os.makedirs(self.directory, exist_ok=True)
+    self.path = "%s/%s"%(self.directory, self.filename)
+    self.queue = asyncio.Queue()
+    
+  def log(self, row: dict) -> None:
+    self.queue.put_nowait(row)
+    
+  async def run(self, header: List[str], freq=5, mode: str="w"):
+    async with aiofiles.open(file=self.path, mode=mode) as file:
+      writer = aiocsv.AsyncDictWriter(file, delimiter=",", lineterminator="\n", fieldnames=header)
+      await writer.writeheader()
+      while True:
+        await asyncio.sleep(freq)
+        size = self.queue.qsize()
+        if size == 0: continue
+        rows: List[Dict[str, Any]] = [ await self.queue.get() for _ in range(size) ]
+        await writer.writerows(rows)
 
 
 class Model:
@@ -45,15 +64,15 @@ class WorkerEngine:
     self.incoming: List[InPort]   = []
   
   def configure(self, config):
-    self.id: int = config['id']
+    self.id: int = config["id"]
     self.config = config
-    self.parameters: dict = self.config['parameters']
+    self.parameters: dict = self.config["parameters"]
     if "log_dir" in self.parameters.keys():
       self.directory = self.parameters["log_dir"]
-    if self.config['host'] and self.config['port']:
-      self.incoming.append(InPort(host=self.config['host'], port=self.config['port'], callback=self.push))
-    for item in self.config['remote_engines']:
-      outport = OutPort(remote_host=item['remote_host'], remote_port=item['remote_port'])
+    if self.config["host"] and self.config["port"]:
+      self.incoming.append(InPort(host=self.config["host"], port=self.config["port"], callback=self.push))
+    for item in self.config["remote_engines"]:
+      outport = OutPort(remote_host=item["remote_host"], remote_port=item["remote_port"])
       self.outgoing.append(outport)
     self.hardware_platform: str = self.parameters["hardware_platform"]
     if "device" in self.parameters.keys():
@@ -84,12 +103,8 @@ class WorkerEngine:
       self.total_mem = total_memory
       hello_msg = Message (0, "HELLO", {"worker_id": self.id, "total_mem": self.total_mem})
       await self.outgoing[0].send(hello_msg)
-
-      logpath = "{}_worker_{}.csv".format(self.config["parameters"]["log_dir"], self.id)
-      # async_file = logging.basic_logger_mt<flogging.async_factory>f("async_file_logger", logpath, true);
-      # async_file->set_pattern("%v");
-      # async_file->set_level(logging.level:f:debug);
-      # async_file->debug("{},{},{},{},{}", "timestamp", "worker_id", "variant_id", "variant_name", "batch_size");
+      self.logger = Logger(self.config["parameters"]["log_dir"], self.id)
+      self.logger_task = asyncio.create_task(self.logger.run(header=["timestamp", "worker_id", "variant_id", "name", "throughput", "batch_size"]))
     else:
       ValueError("Unknown the given value of the type -> {}.".format(msg.type))
     
@@ -155,18 +170,17 @@ class WorkerEngine:
             elapsed = time.time()
             model(input_tensor)
             self.variants[key].throughput = self.variants[key].batch_size / (time.time() - elapsed)
-            # logging.info(f"Inference: worker-id={self.id}, id={self.variants[key].id}, name={self.variants[key].name}, thr={self.variants[key].throughput}"),
-            # self.logger.log({
-            #   "at": time.time(),
-            #   "start_at": msg.timestamp,
-            #   "worker_id": self.id,
-            #   "id": self.variant.id,
-            #   "name": self.variant.name,
-            #   "qsize": self.variant.qsize,
-            #   "throughput": self.variant.throughput,
-            #   "batch_size": self.variant.batch_size,
-            #   "input_rate": self.variant.input_rate,
-            #   })
+            logging.info(f"Inference: worker-id={self.id}, id={self.variants[key].id}, name={self.variants[key].name}, thr={self.variants[key].throughput}")
+            "timestamp", "worker_id", "variant_id", "name", "throughput", "batch_size"
+            self.logger.log({
+              "timestamp": time.time(),
+              # "start_at": msg.timestamp,
+              "worker_id": self.id,
+              "variant_id": self.variants[key].id,
+              "name": self.variants[key].name,
+              "throughput": self.variants[key].throughput,
+              "batch_size": self.variants[key].batch_size,
+              })
     except Exception as e:
       logging.error(f"⛔️ Error during inference\n\t{e}")
   
