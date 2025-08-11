@@ -24,7 +24,7 @@ public:
   {
     try
     {
-      spdlog::debug("[InPort] Host: {}, Port: {}" + host, port);
+      spdlog::debug("[InPort] Host: {}, Port: {}", host_, port_);
       // Set logging settings
       server_.get_alog().set_channels(websocketpp::log::alevel::none);
 
@@ -67,6 +67,11 @@ public:
 
   ~InPort()
   {
+    close();
+  }
+
+  void close()
+  {
     server_.stop();
     message_queue_.push(""); // Empty string signals shutdown
     if (consumer_thread_.joinable())
@@ -77,6 +82,7 @@ public:
     {
       server_thread_.join();
     }
+    spdlog::warn("👋[InPort] About to close ws://{}:{}.", host_, port_);
   }
 
   std::string to_string() const
@@ -166,14 +172,14 @@ public:
 
   ~OutPort()
   {
+    close();
+  }
+  
+  void close()
+  {
     Message message("FINISHED");
     message_queue_.push(message); // Empty string signals shutdown
     client_.stop();
-    join();
-  }
-
-  void join()
-  {
     if (runner_thread_.joinable())
     {
       runner_thread_.join();
@@ -182,6 +188,7 @@ public:
     {
       client_thread_.join();
     }
+    spdlog::warn("👋[OutPort] About to close ws://{}:{}.", remote_host_, remote_port_);
   }
   
   void connect()
@@ -247,7 +254,7 @@ private:
       {
         Message message = message_queue_.pop();
         client_.send(hdl_, message.serialize(), websocketpp::frame::opcode::text);
-        if (message.getType() == "FINISHED")
+        if (message.get_type() == "FINISHED")
         {
           cout << "--- Will close connection---" << endl;
           break;
@@ -256,7 +263,7 @@ private:
     }
     catch (const std::exception &e)
     {
-      spdlog::error("⛔️ Connection lost\n\t{}", e.what());
+      spdlog::error("⛔️ Connection lost to {}\n\t{}", uri_, e.what());
     }
   }
 

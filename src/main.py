@@ -16,6 +16,12 @@ logging.basicConfig(
   stream=sys.stderr,
   )
 
+# For server logs
+logging.getLogger("websockets.server").setLevel(logging.ERROR)
+
+# For client logs
+logging.getLogger("websockets.client").setLevel(logging.ERROR)
+
 def main():
   parser = argparse.ArgumentParser(description="Execute video analytics processing pipeline.")
   parser.add_argument("config", metavar="config", type=str, help="Script to run on the server side")

@@ -3,6 +3,7 @@
 
 #include <math.h>
 #include <random>
+#include <algorithm>
 #include "base_scheduler.h"
 #include "utils/general.h"
 #include "utils/datastore.h"
@@ -60,6 +61,55 @@ std::vector<std::vector<double>> create_mask(const std::vector<double> &arr)
   return result;
 }
 
+float mean(const std::vector<float> &arr)
+{
+  float total = 0.0;
+  for (const float item : arr)
+  {
+    total += item;
+  }
+  return total / arr.size();
+}
+
+std::string vec2str(const std::vector<double> &arr)
+{
+  std::string out = "[ ";
+  for (size_t i = 0; i < arr.size(); i++)
+  {
+    if (i > 0)
+      out += ", ";
+    out += std::to_string(arr[i]);
+  }
+  out += " ]";
+  return out;
+}
+
+std::string vec2str(const std::vector<float> &arr)
+{
+  std::string out = "[ ";
+  for (size_t i = 0; i < arr.size(); i++)
+  {
+    if (i > 0)
+      out += ", ";
+    out += std::to_string(arr[i]);
+  }
+  out += " ]";
+  return out;
+}
+
+std::string vec2str(const std::vector<std::string> &arr)
+{
+  std::string out = "[ ";
+  for (size_t i = 0; i < arr.size(); i++)
+  {
+    if (i > 0)
+      out += ", ";
+    out += arr[i];
+  }
+  out += " ]";
+  return out;
+}
+
 class RoomieScheduler : public Scheduler
 {
 private:
@@ -81,31 +131,40 @@ public:
       }
     }
 
-    std::sort(simulations.begin(), simulations.end(),
-              [&](const auto &a, const auto &b)
-              {
-                std::vector<float> perfs = std::get<2>(a);
-                float sum = 0.0;
-                for (const float v : perfs)
-                {
-                  sum += v;
-                }
-                float v_a = sum / perfs.size();
-                perfs = std::get<2>(b);
-                sum = 0.0;
-                for (const float v : perfs)
-                {
-                  sum += v;
-                }
-                float v_b = sum / perfs.size();
-                return v_a < v_b;
-              });
-
+    // if (!simulations.empty())
+    // {
+    //   auto tmp = simulations;
+    //   simulations.clear();
+    //   for (const auto item : tmp)
+    //   {
+    //     // 1. Ensure that any variant doesn't have a perf drop beyond a certain threshold.
+    //     auto it = max_element(std::get<2>(item).begin(), std::get<2>(item).end());
+    //     if (*it <= 0.75)
+    //     {
+    //       simulations.push_back(item);
+    //     }
+    //     // 2. Or, ensure that on average the perf drop is under a certain threshold.
+    //     // if (mean(std::get<2>(item)) <= 0.5)
+    //     // {
+    //     //   simulations.push_back(item);
+    //     // }
+    //   }
+    // }
     if (simulations.empty())
     {
-      std::cout << "🤕[Roomie] Warning no variant candidate found" << std::endl;
+      spdlog::debug("🤕[Roomie] Warning no variant candidate found");
       return {nullptr, nullptr};
     }
+
+    std::sort(simulations.begin(), simulations.end(),
+              [&](const std::tuple<Model *, Worker *, std::vector<float>> &a, const auto &b)
+              {
+                Model *variant = std::get<0>(a);
+                float thr_a = (variant->get_throughput() - variant->get_throughput() * std::get<2>(a)[0]);
+                variant = std::get<0>(b);
+                float thr_b = (variant->get_throughput() - variant->get_throughput() * std::get<2>(b)[0]);
+                return thr_a > thr_b;
+              });
 
     auto &best = simulations.front();
 
@@ -155,6 +214,7 @@ public:
     std::vector<double> new_durations;
     std::vector<int> lengths;
     std::vector<std::vector<std::vector<double>>> masks;
+    std::vector<std::vector<float>> occupancies;
 
     int N = models.size();
     for (int i = 0; i < N; ++i)
@@ -163,16 +223,26 @@ public:
       new_durations.push_back(durations[i]);
       lengths.push_back(models[i]->get_kernels().size());
       std::vector<double> op_durations;
+      std::vector<float> occ;
       for (auto &op : models[i]->get_kernels())
       {
         op_durations.push_back(op->duration);
+        if (op->achieved_occupancy > 1)
+        {
+          occ.push_back(op->achieved_occupancy / 100);
+        }
+        else
+        {
+          occ.push_back(op->achieved_occupancy);
+        }
       }
       masks.push_back(create_mask(op_durations));
+      occupancies.push_back(occ);
     }
 
     for (int i = 0; i < N; ++i)
     {
-      for (int j = 0; j < N; ++j)
+      for (int j = 0; j < N; ++j) /* model to interfere with */
       {
         if (i == j)
         {
@@ -183,16 +253,26 @@ public:
         int p = static_cast<int>(std::ceil((double)lengths[i] / lengths[j] / 2));
 
         std::vector<double> sums;
-        for (const auto &sample : mask_durations)
+        for (const auto &sample_dur : mask_durations)
         {
           double sum = 0.0;
-          for (double v : sample)
+          for (size_t k = 0; k < sample_dur.size(); k++)
           {
-            if (interfere(prob))
+            if (interfere(occupancies[j][k]))
+            // if (interfere(prob))
             {
-              sum += v;
+              sum += sample_dur[k];
             }
           }
+          
+          // for (double v : sample_dur)
+          // {
+          //   if (interfere(occupancies[]))
+          //   // if (interfere(prob))
+          //   {
+          //     sum += v;
+          //   }
+          // }
           sums.push_back(sum);
         }
         new_durations[i] += p * median(sums);
@@ -211,7 +291,7 @@ public:
       variant = new Model(*this->load_model_metadata(worker->get_hardware_platform(), variant_name));
       variant->batch_size = batch_size;
 
-      if (worker->percent_occupation(variant->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY || variant->get_profile_throughput() == 0)
+      if (worker->percent_occupation(variant->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY || variant->get_throughput() == 0)
       {
         continue;
       }
@@ -264,14 +344,12 @@ public:
         {
           perf_drops.push_back((new_durations[i] - durations[i]) / new_durations[i]);
         }
-
         history_[key] = perf_drops;
       }
       else
       {
         perf_drops = {0.0};
       }
-
       results.push_back({variant, perf_drops});
     }
 

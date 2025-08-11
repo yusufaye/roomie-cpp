@@ -15,15 +15,17 @@
 #include "networking/port.h"
 #include "networking/message.h"
 
+using namespace std::chrono;
+
 class PoissonZipfQueryGenerator : public Engine
 {
 private:
   std::string engine_name = "Query-Generator";
-  double duration_;
+  std::map<std::string, int64_t> counter_;
   std::vector<std::string> domain_;
+  int scale_;
   std::string path_;
-  int qps_;
-  std::map<std::string, int> counter_;
+  double duration_;
 
 public:
   void configure(const json config)
@@ -32,13 +34,13 @@ public:
     auto params = config_["parameters"];
     duration_ = 60.0 * params["duration"].get<float>();
     domain_ = params["domain"];
+    scale_ = params["scale"];
     path_ = params["path"];
-    qps_ = params["qps"].get<int>();
   }
 
   void run()
   {
-    spdlog::debug("--- Poisson - Zipf Query Generator ---\n\tduration: {}, path: {}sec, qps: {}", duration_, qps_, path_);
+    spdlog::info("--- Poisson - Zipf Query Generator ---\n\t* path: {}\n\t* scale: {}\n\t* duration: {}", path_, scale_, duration_);
     std::map<std::string, std::string> regis_data;
     for (const auto &name : domain_)
     {
@@ -48,7 +50,8 @@ public:
     outgoing_[0]->push(msg);
 
     std::string names = "";
-    for (const auto name: domain_) {
+    for (const auto name : domain_)
+    {
       names += name + ", ";
     }
     spdlog::debug("Registering model variants: {}", names);
@@ -64,8 +67,8 @@ public:
     }
 
     // DEBUG
-    forward_query_threads_.emplace_back([this]()
-                                        { debug(); });
+    // forward_query_threads_.emplace_back([this]()
+    //                                     { debug(); });
     // DEBUG
 
     auto start = std::chrono::steady_clock::now();
@@ -74,31 +77,34 @@ public:
     {
       std::this_thread::sleep_for(std::chrono::seconds(1));
       auto now = std::chrono::steady_clock::now();
-      double elapsed = std::chrono::duration<double>(now - start).count();
-      // spdlog::debug( "Progress: " << std::min(elapsed, duration_) << " / " << duration_ << " seconds\r";
+      double delay = std::chrono::duration<double>(now - start).count();
+      spdlog::debug("Progress: {} / {} seconds", std::min(delay, duration_), duration_);
+      if (delay > duration_)
+      {
+        break;
+      }
     }
-
-    Message finished_msg("FINISHED");
-    outgoing_[0]->push(finished_msg);
+    exit(0);
   }
 
 private:
   std::vector<std::thread> forward_query_threads_;
 
-  std::unordered_map<int, std::vector<double>> loadTrace(const std::string &filepath)
+  std::unordered_map<int, std::vector<std::pair<double, double>>> loadTrace(const std::string &filepath)
   {
-    std::unordered_map<int, std::vector<double>> data;
+    std::unordered_map<int, std::vector<std::pair<double, double>>> data;
     try
     {
-      io::CSVReader<2> in(WORKDIR + filepath);
-      in.read_header(io::ignore_extra_column, "timestamp", "model");
-      float timestamp;
+      io::CSVReader<3> in(WORKDIR + filepath);
+      in.read_header(io::ignore_extra_column, "delay", "timestamp", "model");
+      double timestamp;
+      double delay;
       int idx;
-      while (in.read_row(timestamp, idx))
+      while (in.read_row(delay, timestamp, idx))
       {
         if (timestamp <= duration_)
         {
-          data[idx].push_back(timestamp);
+          data[idx].push_back({delay, timestamp});
         }
       }
     }
@@ -110,18 +116,17 @@ private:
     return data;
   }
 
-  void sendQueries(const std::string &app_id, std::vector<double> timestamps)
+  void sendQueries(const std::string &app_id, std::vector<std::pair<double, double>> series)
   {
-    counter_[app_id] = 0;
-    std::sort(timestamps.begin(), timestamps.end());
-    double time = 0;
-    for (const double timestamp : timestamps)
+    for (const auto [delay, timestamp] : series)
     {
-      std::this_thread::sleep_for(std::chrono::duration<double>(timestamp - time));
-      Message msg(std::chrono::system_clock::now().time_since_epoch().count(), "QUERY", {{"app_id", app_id}});
-      outgoing_[0]->push(msg);
-      time = timestamp;
-      counter_[app_id]++;
+      std::this_thread::sleep_for(std::chrono::duration<double>(delay));
+      auto seconds = duration_cast<duration<double>>(system_clock::now().time_since_epoch()).count();
+      Message msg(seconds, "QUERY", {{"app_id", app_id}});
+      for (int i = 0; i < scale_; i++)
+      {
+        outgoing_[0]->push(msg);
+      }
     }
   }
 
@@ -140,7 +145,7 @@ private:
       {
         end_total += count;
       }
-      // spdlog::debug( "QPS: {}", end_total - start_total );
+      spdlog::info( "QPS: {}", end_total - start_total );
     }
   }
 };

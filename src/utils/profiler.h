@@ -40,7 +40,7 @@ double convert(const std::string &v)
 // Function to read CSV file
 void set_profiled_kernels(Model &model, std::string data_path = "data/traces")
 {
-    std::string fullpath = WORKDIR + "/" + data_path + "/nsight-compute/xavier/" + model.name + "_preprocessed_ncu.json";
+    std::string fullpath = WORKDIR + "/" + data_path + "/kernel-profiler/" + model.hardware_platform + "/" + model.name + "_kernel_profiler.json";
     json j;
     try
     {
@@ -51,11 +51,11 @@ void set_profiled_kernels(Model &model, std::string data_path = "data/traces")
     }
     catch (const std::exception &e)
     {
-        std::cerr << "⛔️ Error loading profiled data" << "\n\t" << e.what() << '\n';
+        spdlog::error("⛔️ Error loading profiled data from {}\n\t{}", fullpath, e.what());
         return;
     }
     NcuKernel *kernel;
-    for (const auto &item : j["traces"])
+    for (const auto &item : j)
     {
         std::vector<NcuKernel *> kernels;
         for (const auto &k : item["kernels"])
@@ -70,52 +70,44 @@ void set_profiled_kernels(Model &model, std::string data_path = "data/traces")
             kernel->grid_dim_z = k["grid_dim_z"];
             kernel->register_per_thread = k["register_per_thread"];
             kernel->duration = k["duration"];
-            kernel->static_shared_memory_per_block = k["static_shared_memory_per_block"];
-            kernel->dynamic_shared_memory_per_block = k["dynamic_shared_memory_per_block"];
-            kernel->threads = k["threads"];
-            kernel->waves_per_sm = k["waves_per_sm"];
             kernel->shared_memory = k["shared_memory"];
-            kernel->theoretical_occupancy = k["theoretical_occupancy"];
-            kernel->theoretical_active_warps_per_SM = k["theoretical_active_warps_per_SM"];
             kernel->achieved_occupancy = k["achieved_occupancy"];
             kernel->achieved_active_warps_per_SM = k["achieved_active_warps_per_SM"];
-            kernel->block_limit_registers = k["block_limit_registers"];
-            kernel->block_limit_shared_mem = k["block_limit_shared_mem"];
-            kernel->block_limit_warps = k["block_limit_warps"];
-            kernel->block_limit_sm = k["block_limit_sm"];
             kernel->capability_minor = k["capability_minor"];
             kernel->capability_major = k["capability_major"];
             kernels.push_back(kernel);
         }
-        (*model.get_Kernel())[item["batch_size"]] = kernels;
+        model.batch_size = item["batch_size"];
+        model.set_kernels(kernels);
     }
 }
 
-void set_memory(map<int, unsigned long> &Memory, const std::string &variant_name, const std::string &hardware_platform, const std::string &data_path = "data/traces")
+void set_memory(Model &model, const std::string &data_path = "data/traces")
 {
     try
     {
-        std::string fullpath = WORKDIR + "/" + data_path + "/mem-pytorch-extracted/" + variant_name + "_mem-pytorch-extracted.csv";
+        std::string fullpath = WORKDIR + "/" + data_path + "/mem-pytorch-extracted/" + model.name + "_mem-pytorch-extracted.csv";
         io::CSVReader<2> in(fullpath);
         in.read_header(io::ignore_extra_column, "batch_size", "total_reserved");
         int batch_size;
         unsigned long total_reserved;
         while (in.read_row(batch_size, total_reserved))
         {
-            Memory[batch_size] = fmax(total_reserved, Memory[batch_size]);
+            model.batch_size = batch_size;
+            model.set_memory(fmax(total_reserved, model.get_memory()));
         }
     }
     catch (const std::exception &e)
     {
-        std::cerr << "⛔️ Error setting memory for " << variant_name << "\n\t" << e.what() << '\n';
+        std::cerr << "⛔️ Error setting memory for " << model.name << "\n\t" << e.what() << '\n';
     }
 }
 
-void set_throughput(map<int, float> &Throughput, const std::string &variant_name, const std::string &hardware_platform, const std::string &data_path = "data/traces")
+void set_throughput(Model &model, const std::string &data_path = "data/traces")
 {
     try
     {
-        std::string fullpath = WORKDIR + "/" + data_path + "/inference-time/" + hardware_platform + "/" + variant_name + "-" + hardware_platform + "_inference_time.csv";
+        std::string fullpath = WORKDIR + "/" + data_path + "/inference-time/" + model.hardware_platform + "/" + model.name + "-" + model.hardware_platform + "_inference_time.csv";
         io::CSVReader<2> in(fullpath);
         in.read_header(io::ignore_extra_column, "batch_size", "inference_time");
         int batch_size;
@@ -127,20 +119,31 @@ void set_throughput(map<int, float> &Throughput, const std::string &variant_name
         }
         for (auto &[batch_size, elapsed] : Inference_time)
         {
-            Throughput[batch_size] = median(elapsed);
+            model.batch_size = batch_size;
+            model.set_throughput(batch_size / median(elapsed));
         }
     }
     catch (const std::exception &e)
     {
-        std::cerr << "⛔️ Error setting throughput for " << variant_name << "\n\t" << e.what() << '\n';
+        std::cerr << "⛔️ Error setting throughput for " << model.name << "\n\t" << e.what() << '\n';
     }
 }
 
 void pre_profiled(Model &model)
 {
     set_profiled_kernels(model);
-    set_memory(*(model.get_Memory()), model.name, model.hardware_platform);
-    set_throughput(*(model.get_Throughput()), model.name, model.hardware_platform);
+    set_memory(model);
+    set_throughput(model);
+    for (const auto &[batch_size, kernels] : *model.get_all_kernels())
+    {
+        model.batch_size = batch_size;
+        if (kernels.size() == 0)
+        {
+            model.batch_size = batch_size;
+            model.set_throughput(0.0);
+            model.set_memory(0);
+        }
+    }
 }
 
 #endif // PROFILER_H

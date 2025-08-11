@@ -54,11 +54,11 @@ public:
   void push(const Message &msg) override
   {
     spdlog::debug("✉️[WORKER] Recv: {}", msg.to_string());
-    if (msg.getType() == "DEPLOY")
+    if (msg.get_type() == "DEPLOY")
     {
       deployment_queue_.push(msg);
     }
-    else if (msg.getType() == "QUERY")
+    else if (msg.get_type() == "QUERY")
     {
       if (inference_queue_.find(msg.get_data()["variant_id"]) != inference_queue_.end())
       {
@@ -66,11 +66,11 @@ public:
         num_received_[msg.get_data()["variant_id"]] += std::stoi(msg.get_data()["batch_size"]);
       }
     }
-    else if (msg.getType() == "STOP")
+    else if (msg.get_type() == "STOP")
     {
       inference_queue_[msg.get_data()["variant_id"]]->push(0);
     }
-    else if (msg.getType() == "HELLO")
+    else if (msg.get_type() == "HELLO")
     {
       spdlog::debug("👉[WORKER] Hello messge received: {}", msg.to_string());
       id_ = std::stoi(msg.get_data()["worker_id"]);
@@ -83,7 +83,7 @@ public:
       Message hello_msg("HELLO", {{"worker_id", msg.get_data()["worker_id"]}, {"total_mem", std::to_string(total_mem_)}});
       outgoing_[0]->push(hello_msg);
 
-      std::string logpath = config_["parameters"]["log_dir"].get<std::string>() + "_worker_" + std::to_string(id_) + ".csv";
+      std::string logpath = config_["parameters"]["log_dir"].get<std::string>() + "/worker-" + std::to_string(id_) + ".csv";
       // Create a logger
       async_file = spdlog::basic_logger_mt<spdlog::async_factory>("async_file_logger", logpath, true);
       // Set a custom format string
@@ -130,7 +130,7 @@ public:
           j.push_back({
               {"variant_id", variant->id},
               {"variant_name", variant->name},
-              {"throughput", variant->get_throughput()},
+              {"throughput", variant->get_achieved_throughput()},
               {"input_rate", variant->input_rates},
           });
         }
@@ -208,7 +208,7 @@ public:
           module.forward({input});
           // std::this_thread::sleep_for(std::chrono::milliseconds(100)); // [TODO] Debug purpose.
           endTime = chrono::high_resolution_clock::now();
-          model->set_throughput(model->batch_size / std::chrono::duration_cast<std::chrono::duration<double>>(endTime - startTime).count());
+          model->set_achieved_throughput(model->batch_size / std::chrono::duration_cast<std::chrono::duration<double>>(endTime - startTime).count());
           async_file->debug("{},{},{},{},{}",
                             std::chrono::system_clock::to_time_t(endTime),
                             id_,

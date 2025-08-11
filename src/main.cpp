@@ -1,3 +1,5 @@
+#include <csignal>
+#include <cstdlib>
 #include <unistd.h>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -15,17 +17,31 @@
 #include "networking/port.h"
 #include "networking/message.h"
 
-
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
+std::atomic<bool> terminateFlag(false);
+
+void signalHandler(int sig)
+{
+  std::cout << "\nSignal received: " << sig << "\n";
+  terminateFlag.store(true);
+}
+
 int main(int argc, char const *argv[])
 {
+  std::signal(SIGABRT, signalHandler);
+  std::signal(SIGSEGV, signalHandler);
+  std::signal(SIGFPE, signalHandler);
+  std::signal(SIGILL, signalHandler);
+  std::signal(SIGINT, signalHandler);  // Ctrl+C
+  std::signal(SIGTERM, signalHandler); // kill
+
   auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
   console_sink->set_color_mode(spdlog::color_mode::always);
   auto logger = std::make_shared<spdlog::logger>("roomie", console_sink);
   spdlog::set_default_logger(logger);
-  spdlog::set_level(spdlog::level::debug);
+  spdlog::set_level(spdlog::level::info);
 
   if (argc > 1)
   {
@@ -67,7 +83,16 @@ int main(int argc, char const *argv[])
       exit(1);
     }
     engine->configure(config);
-    engine->start();
+    std::thread start_thread([&engine]()
+                             { engine->start(); });
+
+    while (!terminateFlag.load())
+    {
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    spdlog::warn("👋Will shutdown");
+    engine->shutdown();
+    exit(0);
   }
   else
   {

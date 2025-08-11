@@ -8,13 +8,26 @@
 
 using namespace std;
 
+enum class State
+{
+  UNSET,
+  SET,
+  DEPLOYING,
+};
+
+std::map<State, std::string> state2str = {
+    {State::UNSET, "UNSET"},
+    {State::SET, "SET"},
+    {State::DEPLOYING, "DEPLOYING"},
+};
+
 class Model
 {
 private:
-  float achieved_throughput = 0.0;
-  map<int, float> map_throughput;
-  map<int, unsigned long> map_memory;
-  map<int, std::vector<NcuKernel *>> map_kernel;
+  float achieved_throughput_ = 0.0;
+  map<int, float> throughput_;
+  map<int, unsigned long> memory_;
+  map<int, std::vector<NcuKernel *>> kernels_;
 
 public:
   int id;
@@ -49,13 +62,13 @@ public:
     qsize = model.qsize;
     accuracy = model.accuracy;
     occupancy = model.occupancy;
-    achieved_throughput = model.achieved_throughput;
+    achieved_throughput_ = model.achieved_throughput_;
     batch_size = model.batch_size;
     model_memory = model.model_memory;
     window_size = model.window_size;
-    map_throughput = model.map_throughput;
-    map_memory = model.map_memory;
-    map_kernel = model.map_kernel;
+    throughput_ = model.throughput_;
+    memory_ = model.memory_;
+    kernels_ = model.kernels_;
   }
 
   Model(int id_, string name_, string hardware_platform_) : id(id_),
@@ -67,36 +80,15 @@ public:
   std::vector<NcuKernel *> get_kernels(int bs = 0) const
   {
     if (bs == 0)
+    {
       bs = batch_size;
-    auto it = map_kernel.find(bs);
-    if (it != map_kernel.end())
+    }
+    auto it = kernels_.find(bs);
+    if (it != kernels_.end())
+    {
       return it->second;
+    }
     return std::vector<NcuKernel *>();
-  }
-
-  void set_kernels(vector<NcuKernel *> kernels, int batch_size)
-  {
-    map_kernel[batch_size] = kernels;
-  }
-
-  map<int, std::vector<NcuKernel *>> *get_Kernel()
-  {
-    return &map_kernel;
-  }
-
-  map<int, unsigned long> *get_Memory()
-  {
-    return &map_memory;
-  }
-
-  map<int, float> *get_Throughput()
-  {
-    return &map_throughput;
-  }
-
-  float get_profile_throughput()
-  {
-    return map_throughput[batch_size];
   }
 
   float input_rate()
@@ -106,36 +98,106 @@ public:
     {
       total += input_rates[i];
     }
-    
     return total / input_rates.size();
   }
 
   float initial_duration() const
   {
     float value = 0.0;
-    for (const NcuKernel * it : get_kernels()) {
+    for (const NcuKernel *it : get_kernels())
+    {
       value += it->duration;
     }
     return value;
   }
 
-  float get_throughput()
+  float get_achieved_throughput() const
   {
-    if (achieved_throughput > 0)
-      return achieved_throughput;
-    return get_profile_throughput();
+    if (achieved_throughput_ > 0)
+    {
+      return achieved_throughput_;
+    }
+    return get_throughput();
   }
 
-  void set_throughput(float achieved_throughput_)
+  void set_achieved_throughput(float achieved_throughput_)
   {
-    achieved_throughput = achieved_throughput_;
+    achieved_throughput_ = achieved_throughput_;
   }
 
-  unsigned long get_memory(int bs = 0)
+  void set_kernels(std::vector<NcuKernel *> kernels, int bs = 0)
   {
     if (bs == 0)
+    {
       bs = batch_size;
-    return map_memory[bs];
+    }
+    kernels_[bs] = kernels;
+  }
+
+  std::vector<NcuKernel *> &get_kernels(int bs = 0)
+  {
+    if (bs == 0)
+    {
+      bs = batch_size;
+    }
+    return kernels_[bs];
+  }
+
+  std::map<int, std::vector<NcuKernel *>> *get_all_kernels()
+  {
+    return &kernels_;
+  }
+
+  void set_memory(unsigned long mem, int bs = 0)
+  {
+    if (bs == 0)
+    {
+      bs = batch_size;
+    }
+    memory_[bs] = mem;
+  }
+
+  /**
+   * Return profiled memory.
+   */
+  unsigned long get_memory(int bs = 0) const
+  {
+    if (bs == 0)
+    {
+      bs = batch_size;
+    }
+    auto it = memory_.find(bs);
+    if (it != memory_.end())
+    {
+      return it->second;
+    }
+    return 0;
+  }
+
+  void set_throughput(float thr, int bs = 0)
+  {
+    if (bs == 0)
+    {
+      bs = batch_size;
+    }
+    throughput_[bs] = thr;
+  }
+
+  /**
+   * Return profiled throughput.
+   */
+  float get_throughput(int bs = 0) const
+  {
+    if (bs == 0)
+    {
+      bs = batch_size;
+    }
+    auto it = throughput_.find(bs);
+    if (it != throughput_.end())
+    {
+      return it->second;
+    }
+    return 0;
   }
 
   float compute_workload()
@@ -146,14 +208,14 @@ public:
     {
       workload += input_rates[i];
     }
-    
+
     return workload;
   }
 
   float compute_throughput()
   {
     // Calculate the throughput based on the window size of the previously recorded input rate.
-    return get_throughput() * input_rates.size();
+    return get_achieved_throughput() * input_rates.size();
   }
 
   void update(Model obj)
@@ -162,7 +224,7 @@ public:
     qsize = obj.qsize;
     accuracy = obj.accuracy;
     occupancy = obj.occupancy;
-    achieved_throughput = obj.achieved_throughput;
+    achieved_throughput_ = obj.achieved_throughput_;
     batch_size = obj.batch_size;
     input_rates = obj.input_rates;
     hardware_platform = obj.hardware_platform;
@@ -175,12 +237,12 @@ public:
 
   std::string to_string()
   {
-    return "Model('id'=" + std::to_string(id) + ", 'name'=" + name + ", 'thr'=" + std::to_string(get_throughput()) + ", 'bs'=" + std::to_string(batch_size) + ", 'mem'=" + std::to_string(get_memory()) + ")";
+    return "Model('id'=" + std::to_string(id) + ", 'name'=" + name + ", 'thr'=" + std::to_string(get_achieved_throughput()) + ", 'bs'=" + std::to_string(batch_size) + ", 'mem'=" + std::to_string(get_memory()) + ")";
   }
 
   ostream &operator<<(ostream &os)
   {
-    return os << "Model(id=" << id << ", name=" << name << ", thr=" << get_throughput() << ", bs=" << batch_size << ", mem=" << get_memory() << ")";
+    return os << "Model(id=" << id << ", name=" << name << ", thr=" << get_achieved_throughput() << ", bs=" << batch_size << ", mem=" << get_memory() << ")";
   }
 };
 
@@ -229,7 +291,7 @@ public:
 
   std::string to_string()
   {
-    std::string os = "Worker('id'=" + std::to_string(id_) + ", 'free memory'=" + std::to_string(get_free_memory()) + ", 'total memory'=" + std::to_string(total_memory_) + ", 'hardware platform'=" + hardware_platform_ + ", 'deploying'=" + std::to_string(deploying_) + ", 'variants'=[";
+    std::string os = "Worker('id'=" + std::to_string(id_) + ", 'free memory'=" + std::to_string(get_free_memory()) + ", 'total memory'=" + std::to_string(total_memory_) + ", 'hardware platform'=" + hardware_platform_ + ", 'state'=" + state2str[state_] + ", 'variants'=[";
     for (size_t i = 0; i < variants_.size(); ++i)
     {
       os += variants_[i]->name;
@@ -242,11 +304,17 @@ public:
     return os;
   }
 
-  void set_total_memory(double value) { total_memory_ = value; }
+  void set_total_memory(double total_memory) { total_memory_ = total_memory; }
 
-  void set_deployment(bool value) { deploying_ = value; }
+  void set_hardware_platform(std::string hardware_platform) { hardware_platform_ = hardware_platform; }
 
-  void add_variant(Model *variant) {
+  void set_state(State state)
+  {
+    state_ = state;
+  }
+
+  void add_variant(Model *variant)
+  {
     variants_.push_back(variant);
   }
 
@@ -262,12 +330,36 @@ public:
     }
   }
 
+  bool exists(const int id) const
+  {
+    for (const auto variant : variants_)
+    {
+      if (variant->id == id)
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool exists(const Model &obj) const
+  {
+    for (const auto variant : variants_)
+    {
+      if (variant->id == obj.id)
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+
   std::vector<Model *> get_variants() const { return variants_; }
   int get_id() const { return id_; }
   int get_device() const { return device_; }
   double get_total_memory() const { return total_memory_; }
   string get_hardware_platform() const { return hardware_platform_; }
-  bool is_deploying() const { return deploying_; }
+  State get_state() const { return state_; }
   int get_total_running_variants() const { return variants_.size(); }
 
 private:
@@ -276,7 +368,7 @@ private:
   string hardware_platform_;
   double total_memory_;
   string device_name_;
-  bool deploying_ = false;
+  State state_;
   std::vector<Model *> variants_;
 };
 
@@ -332,6 +424,21 @@ public:
       }
     }
     return variants;
+  }
+
+  Model *get_variant(const int id)
+  {
+    for (auto &worker : get_workers())
+    {
+      for (const auto &variant : worker->get_variants())
+      {
+        if (variant->id == id)
+        {
+          return variant;
+        }
+      }
+    }
+    return nullptr;
   }
 
   std::vector<Model *> get_variants()
@@ -424,6 +531,15 @@ public:
     }
     return variant_workers;
   }
+
+  // void set_state(State state)
+  // {
+  //   std::lock_guard<std::mutex> lock(mutex_);
+  //   for (auto worker : workers_)
+  //   {
+  //     worker->set_state(state);
+  //   }
+  // }
 
   Worker *get_worker(int id)
   {

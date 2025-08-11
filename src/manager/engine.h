@@ -52,6 +52,18 @@ public:
     }
   }
 
+  virtual void shutdown()
+  {
+    for (auto port: incoming_)
+    {
+      port->close();
+    }
+    for (auto port: outgoing_)
+    {
+      port->close();
+    }
+  }
+
   virtual void push(const Message &msg)
   {
     throw std::runtime_error("Not implemented");
@@ -75,7 +87,7 @@ public:
       throw e;
     }
 
-    std::cout << "--- " + engine_name_ + " terminated! ---" << std::endl;
+    spdlog::warn("🤠 [ENGINE] {} terminated!", engine_name_);
   }
 
   std::vector<OutPort *> get_outgoing()

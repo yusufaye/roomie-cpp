@@ -17,8 +17,8 @@ private:
   std::function<void(const std::string &app_id, Model &variant, Worker &worker)> on_stop_;
 
   int interval = 2; // seconds
-  double threshold = 1.0;
-  // double threshold = 1.5;
+  // double threshold = 1.0;
+  double threshold = 1.5;
   std::map<string, int> locker_;
 
 public:
@@ -33,19 +33,18 @@ public:
   void run()
   {
     event_.wait();
-    spdlog::debug( "😎 [auto-scaler] About to start the auto-scaling." );
+    spdlog::info("😎 [auto-scaler] About to start the auto-scaling.");
 
     // Start monitoring loop
     while (true)
     {
       std::this_thread::sleep_for(std::chrono::seconds(interval));
-      std::pair<std::string, double> most_overloaded_app = {"", 0.0};
-
+      std::vector<std::pair<std::string, float>> overloaded;
       for (const auto &[app_id, names] : datastore_->get_registration())
       {
         if (locker_.find(app_id) != locker_.end() && locker_[app_id] > 0)
         {
-          cout << "Locker for app " << app_id << " is " << locker_[app_id] << endl;
+          // spdlog::warn("Locker for app {} is {}", app_id, locker_[app_id]);
           locker_[app_id]--;
           continue;
         }
@@ -72,93 +71,97 @@ public:
           throughput += variant->compute_throughput();
           workload += variant->compute_workload();
         }
-        double ratio = workload / throughput;
-        if (ratio > most_overloaded_app.second)
-        {
-          most_overloaded_app = {app_id, ratio};
-        }
-
-        // spdlog::debug( "🔵 [auto-scaler] For " + app_id + " Load=" + std::to_string(workload) + ", Thr=" + std::to_string(throughput) + ", Ratio=" + std::to_string(ratio) << std::endl;
+        overloaded.push_back({app_id, workload / throughput});
       }
-
-      auto [app_id, ratio] = most_overloaded_app;
-      try
+      std::sort(overloaded.begin(), overloaded.end(), [](const std::pair<std::string, float> &a, const std::pair<std::string, float> &b)
+                { return a.second < b.second; });
+      std::string summary = "";
+      for (const auto [app_id, ratio] : overloaded)
       {
-        if (ratio > 0)
-        {
-          auto_scale(app_id, ratio);
-        }
+        summary += "\n\t| " + app_id + ": Ratio=" + std::to_string(ratio);
       }
-      catch (const std::exception &e)
+      spdlog::debug("🔵 [auto-scaler] Summary: {}", summary);
+
+      for (size_t i = 0; i < overloaded.size(); i++)
       {
-        std::cerr << e.what() << '\n';
+        downscale(overloaded[i].first, overloaded[i].second);
+      }
+      for (int i = overloaded.size() - 1; i >= 0; i--)
+      {
+        if (upscale(overloaded[i].first, overloaded[i].second))
+        {
+          break;
+        }
       }
     }
   }
 
-  bool auto_scale(const string &app_id, double ratio)
+  bool upscale(const string &app_id, float ratio)
+  {
+    if (ratio <= threshold)
+    {
+      return false;
+    }
+    std::vector<Worker *> _workers;
+    for (const auto worker : datastore_->get_workers())
+    {
+      // if (worker->get_state() == State::SET)
+      // {
+      //   _workers.push_back(worker);
+      // }
+      _workers.push_back(worker);
+    }
+    if (_workers.empty())
+    {
+      spdlog::warn("⚠️ [auto-scaler] All workers are deploying.");
+      return false;
+    }
+    std::vector<std::string> names;
+    for (const auto name : datastore_->get_registered(app_id))
+    {
+      names.push_back(name);
+    }
+    auto [variant, worker] = scheduler_->schedule(_workers, names);
+    if (variant != nullptr)
+    {
+      if (worker->percent_occupation(variant->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY)
+      {
+        throw std::runtime_error("⛔️[auto-scaler] Not enough memory left for " + variant->to_string() + " at " + worker->to_string() + "\n\t| New occupancy: " + std::to_string(worker->percent_occupation(variant->get_memory())) + " (%)");
+      }
+      on_deploy_(app_id, *variant, *worker);
+      locker_[app_id] = 5;
+      spdlog::debug("⬆️[auto-scaler] About to perform upscaling:\n\t| {}\n\t| to {}", variant->to_string(), worker->to_string());
+      return true;
+    }
+    return false;
+  }
+
+  bool downscale(const string &app_id, float ratio)
   {
     if (ratio < 0.5)
     {
-      auto departure = Downscaling(app_id, true);
-      if (departure.first != nullptr)
+      auto [variant, worker] = downscaling_(app_id, true);
+      if (variant != nullptr)
       {
-        on_stop_(app_id, *departure.first, *departure.second);
+        on_stop_(app_id, *variant, *worker);
+        spdlog::debug("⬇️[auto-scaler] About to perform downscaling:\n\t| {}\n\t| to {}", variant->to_string(), worker->to_string());
         return true;
       }
     }
     else if (ratio < 0.8)
     {
-      auto departure = Downscaling(app_id, false);
-      if (departure.first != nullptr)
+      auto [variant, worker] = downscaling_(app_id, false);
+      if (variant != nullptr)
       {
-        on_stop_(app_id, *departure.first, *departure.second);
-        return true;
-      }
-    }
-    else if (ratio > threshold)
-    {
-      auto upscaling = Upscaling(app_id);
-      if (upscaling.first != nullptr)
-      {
-
-        if (upscaling.second->percent_occupation(upscaling.first->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY)
-        {
-          throw std::runtime_error("⛔️[auto-scaler] Not enough memory left for " + upscaling.first->to_string() + " at " + upscaling.second->to_string() + "\n\t| New occupancy: " + std::to_string(upscaling.second->percent_occupation(upscaling.first->get_memory())) + " (%)");
-        }
-        on_deploy_(app_id, *upscaling.first, *upscaling.second);
-        locker_[app_id] = 5;
+        on_stop_(app_id, *variant, *worker);
+        spdlog::debug("⬇️[auto-scaler] About to perform downscaling:\n\t| {}\n\t| to {}", variant->to_string(), worker->to_string());
         return true;
       }
     }
     return false;
   }
 
-  std::pair<Model *, Worker *> Upscaling(const string &app_id)
-  {
-    std::vector<Worker *> _workers;
-    for (const auto worker : datastore_->get_workers())
-    {
-      if (!worker->is_deploying())
-      {
-        _workers.push_back(worker);
-      }
-    }
-    if (_workers.empty())
-    {
-      spdlog::debug( "⚠️ [auto-scaler] No worker found for upscaling." );
-      return {nullptr, nullptr};
-    }
-
-    std::vector<std::string> names;
-    for (const auto name : datastore_->get_registered(app_id))
-    {
-      names.push_back(name);
-    }
-    return scheduler_->schedule(_workers, names);
-  }
-
-  std::pair<Model *, Worker *> Downscaling(const string &app_id, bool force)
+  std::pair<Model *, Worker *> downscaling_(const string &app_id, bool force)
   {
     std::vector<std::pair<Model *, Worker *>> candidates = datastore_->get_variant_workers(app_id);
     if (candidates.size() > 1)
@@ -168,7 +171,7 @@ public:
         std::sort(candidates.begin(), candidates.end(),
                   [](std::pair<Model *, Worker *> &a, std::pair<Model *, Worker *> &b)
                   {
-                    return a.first->get_throughput() < b.first->get_throughput();
+                    return a.first->get_achieved_throughput() < b.first->get_achieved_throughput();
                   });
         return candidates.front();
       }
