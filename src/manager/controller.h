@@ -22,6 +22,8 @@
 #include "scheduling/usher_scheduler.h"
 #include "scheduling/infaas_scheduler.h"
 #include "scheduling/roomie_scheduler.h"
+#include "scheduling/least_loaded_scheduler.h"
+#include "scheduling/less_running_variants_scheduler.h"
 
 using namespace std::chrono;
 
@@ -46,6 +48,14 @@ public:
     else if (config_["parameters"]["scheduling"] == "UsherSchaduling")
     {
       scheduler_ = new UsherScheduler();
+    }
+    else if (config_["parameters"]["scheduling"] == "LeastLoadedSchaduling")
+    {
+      scheduler_ = new LeastLoadedScheduler();
+    }
+    else if (config_["parameters"]["scheduling"] == "LessRunningVariantsScheduling")
+    {
+      scheduler_ = new LessRunningVariantsScheduler();
     }
     else
     {
@@ -319,7 +329,7 @@ public:
       send(worker, msg);
       spdlog::debug("👉[controller] New deployment done for {}", app_id);
       int counter = 0;
-      for (const auto worker: datastore_.get_workers())
+      for (const auto worker : datastore_.get_workers())
       {
         if (worker->get_total_running_variants() > 0)
         {
