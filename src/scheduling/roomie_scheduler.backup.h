@@ -240,11 +240,12 @@ public:
         }
 
         auto mask_durations = masks[j];
+        int p = std::max(masks[i].size() / masks[j].size() / 2, 1);
 
-        std::vector<double> delays;
+        std::vector<double> sums;
         for (const auto &sample_dur : mask_durations)
         {
-          double delayed = 0.0;
+          double sum = 0.0;
           for (size_t k = 0; k < mask_durations.size(); k++)
           {
             if (interfere(prob))
@@ -253,14 +254,12 @@ public:
               {
                 break;
               }
-              delayed += sample_dur[k];
+              sum += sample_dur[k];
             }
           }
-          delays.push_back(delayed);
+          sums.push_back(sum);
         }
-        /* Determine the number of time the model(j) might terminate while model(j) still executing. */
-        double overlap = std::max((double)masks[i].size() / masks[j].size() / 2, 1.0);
-        new_durations[i] += overlap * median(delays);
+        new_durations[i] += p * median(sums);
       }
     }
 

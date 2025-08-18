@@ -31,16 +31,16 @@ std::vector<std::vector<double>> create_mask(const std::vector<double> &arr)
   int M = std::min(static_cast<int>(std::ceil(L / 2.0)), 5);
   M = (M % 2 == 0) ? M + 1 : M;
   std::vector<std::vector<double>> mask(M, std::vector<double>(L, 1.0));
-  int window = M / 2;
-  for (int pad = 1; pad <= window; ++pad)
+  int max_pad = M / 2;
+  for (int pad = 1; pad <= max_pad; ++pad)
   {
     for (int j = 0; j < pad; ++j)
     {
-      mask[pad - 1][j] = 0.0; /* (f)-> i=0,1,...,w; j=0,1,...,w-1*/
+      mask[pad - 1][j] = 0.0;
     }
     for (int j = L - pad; j < L; ++j)
     {
-      mask[M - pad][j] = 0.0; /* (b)-> i=N-w,N-w+1,...,N-1; j=N-w,N-w+1,...,N-1*/
+      mask[M - pad][j] = 0.0;
     }
   }
   std::vector<std::vector<double>> result(M, std::vector<double>(L, 0.0));
@@ -131,25 +131,25 @@ public:
       }
     }
 
-    if (!simulations.empty())
-    {
-      auto tmp = simulations;
-      simulations.clear();
-      for (const auto item : tmp)
-      {
-        // 1. Ensure that any variant doesn't have a perf drop beyond a certain threshold.
-        auto it = max_element(std::get<2>(item).begin(), std::get<2>(item).end());
-        if (*it <= 0.75)
-        {
-          simulations.push_back(item);
-        }
-        // 2. Or, ensure that on average the perf drop is under a certain threshold.
-        // if (mean(std::get<2>(item)) <= 0.5)
-        // {
-        //   simulations.push_back(item);
-        // }
-      }
-    }
+    // if (!simulations.empty())
+    // {
+    //   auto tmp = simulations;
+    //   simulations.clear();
+    //   for (const auto item : tmp)
+    //   {
+    //     // 1. Ensure that any variant doesn't have a perf drop beyond a certain threshold.
+    //     auto it = max_element(std::get<2>(item).begin(), std::get<2>(item).end());
+    //     if (*it <= 0.75)
+    //     {
+    //       simulations.push_back(item);
+    //     }
+    //     // 2. Or, ensure that on average the perf drop is under a certain threshold.
+    //     // if (mean(std::get<2>(item)) <= 0.5)
+    //     // {
+    //     //   simulations.push_back(item);
+    //     // }
+    //   }
+    // }
     if (simulations.empty())
     {
       spdlog::debug("🤕[Roomie] Warning no variant candidate found");
@@ -212,22 +212,32 @@ public:
   {
     std::vector<double> durations;
     std::vector<double> new_durations;
-    // std::vector<int> lengths;
+    std::vector<int> lengths;
     std::vector<std::vector<std::vector<double>>> masks;
+    std::vector<std::vector<float>> occupancies;
 
     int N = models.size();
     for (int i = 0; i < N; ++i)
     {
       durations.push_back(models[i]->initial_duration());
       new_durations.push_back(durations[i]);
-      // lengths.push_back(models[i]->get_kernels().size());
+      lengths.push_back(models[i]->get_kernels().size());
       std::vector<double> op_durations;
       std::vector<float> occ;
       for (auto &op : models[i]->get_kernels())
       {
         op_durations.push_back(op->duration);
+        if (op->achieved_occupancy > 1)
+        {
+          occ.push_back(op->achieved_occupancy / 100);
+        }
+        else
+        {
+          occ.push_back(op->achieved_occupancy);
+        }
       }
       masks.push_back(create_mask(op_durations));
+      occupancies.push_back(occ);
     }
 
     for (int i = 0; i < N; ++i)
@@ -240,27 +250,32 @@ public:
         }
 
         auto mask_durations = masks[j];
+        int p = static_cast<int>(std::ceil((double)lengths[i] / lengths[j] / 2));
 
-        std::vector<double> delays;
+        std::vector<double> sums;
         for (const auto &sample_dur : mask_durations)
         {
-          double delayed = 0.0;
-          for (size_t k = 0; k < mask_durations.size(); k++)
+          double sum = 0.0;
+          for (size_t k = 0; k < sample_dur.size(); k++)
           {
-            if (interfere(prob))
+            if (interfere(occupancies[j][k]))
+            // if (interfere(prob))
             {
-              if (k > masks[i].size())
-              {
-                break;
-              }
-              delayed += sample_dur[k];
+              sum += sample_dur[k];
             }
           }
-          delays.push_back(delayed);
+          
+          // for (double v : sample_dur)
+          // {
+          //   if (interfere(occupancies[]))
+          //   // if (interfere(prob))
+          //   {
+          //     sum += v;
+          //   }
+          // }
+          sums.push_back(sum);
         }
-        /* Determine the number of time the model(j) might terminate while model(j) still executing. */
-        double overlap = std::max((double)masks[i].size() / masks[j].size() / 2, 1.0);
-        new_durations[i] += overlap * median(delays);
+        new_durations[i] += p * median(sums);
       }
     }
 
