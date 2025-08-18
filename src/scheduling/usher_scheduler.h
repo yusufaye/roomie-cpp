@@ -60,7 +60,7 @@ public:
     auto variant_workers = usher(workers, variant_candidates);
 
     std::sort(variant_workers.begin(), variant_workers.end(), [](const std::tuple<Model *, Worker *, float> a, const std::tuple<Model *, Worker *, float> b)
-              { return -get<0>(a)->get_throughput() < -get<0>(b)->get_throughput(); });
+              { return get<0>(a)->get_throughput() > get<0>(b)->get_throughput(); });
 
     if (variant_workers.empty())
     {
@@ -334,24 +334,24 @@ public:
           }
         }
 
+        // Consider a new worker
         if (worker_candidates.empty())
         {
           for (auto &worker : workers)
           {
-            if (worker->get_hardware_platform() == wrapper->model->hardware_platform &&
-                worker->percent_occupation(wrapper->model->get_memory()) <= MAX_GPU_MEMORY_OCCUPANCY)
+            if (worker->percent_occupation(wrapper->model->get_memory()) <= MAX_GPU_MEMORY_OCCUPANCY)
             {
               worker_candidates.push_back(worker);
             }
           }
-          std::sort(worker_candidates.begin(), worker_candidates.end(),
-                    [](Worker *a, Worker *b)
-                    {
-                      return a->get_free_memory() > b->get_free_memory();
-                    });
           if (!worker_candidates.empty())
           {
-            worker_candidates = {worker_candidates.front()};
+            std::sort(worker_candidates.begin(), worker_candidates.end(),
+                      [](Worker *a, Worker *b)
+                      {
+                        return a->get_free_memory() > b->get_free_memory();
+                      });
+            // worker_candidates = {worker_candidates.front()};
           }
         }
 

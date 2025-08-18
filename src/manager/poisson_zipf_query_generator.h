@@ -118,7 +118,6 @@ private:
 
   void sendQueries(const std::string &app_id, std::vector<std::pair<double, double>> series)
   {
-    counter_[app_id] = 0;
     for (const auto [delay, timestamp] : series)
     {
       std::this_thread::sleep_for(std::chrono::duration<double>(delay));
@@ -127,7 +126,6 @@ private:
       for (int i = 0; i < scale_; i++)
       {
         outgoing_[0]->push(msg);
-        counter_[app_id]++;
       }
     }
   }
@@ -137,7 +135,7 @@ private:
     while (true)
     {
       int start_total = 0;
-      int end_total   = 0;
+      int end_total = 0;
       for (const auto [_, count] : counter_)
       {
         start_total += count;
@@ -147,7 +145,7 @@ private:
       {
         end_total += count;
       }
-      spdlog::info("QPS: {}", end_total - start_total);
+      spdlog::info( "QPS: {}", end_total - start_total );
     }
   }
 };
