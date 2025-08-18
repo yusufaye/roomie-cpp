@@ -1,7 +1,6 @@
 #ifndef OCCUPANCY_H
 #define OCCUPANCY_H
 
-
 #include <map>
 #include <math.h>
 #include "csv.h"
@@ -14,26 +13,25 @@ public:
   float occupancy = 0.0;
   int max_blocks = 0;
   int list_max_blocks[3] = {0, 0, 0};
-  map<std::string, int> resource_required_per_block;
+  std::map<std::string, int> resource_required_per_block;
   int warpsPerBlock = 0;
   int warpsPerMultiprocessor = 0;
   Perf()
   {
-    resource_required_per_block["warps_per_block"] = 0;
-    resource_required_per_block["regs_per_block"] = 0;
-    resource_required_per_block["shared_memory_per_block"] = 0;
+    resource_required_per_block["warps_per_block"]          = 0;
+    resource_required_per_block["regs_per_block"]           = 0;
+    resource_required_per_block["shared_memory_per_block"]  = 0;
   }
 
-  std::array<float, 2> compute_perf_drop(int blocksPerSM)
+  /**
+   * Compute the performance drop.
+   * Args:
+   *  blocksPerSM (int): maximum blocks per multiprocessor.
+   * Returns:
+   *  pair: (new theorical occupancy, ratio)
+   */
+  std::pair<float, float> compute_perf_drop(int blocksPerSM)
   {
-    // """Compute the performance drop.
-
-    // Args:
-    //   blocksPerSM (int): maximum blocks per multiprocessor.
-
-    // Returns:
-    //   tuple: (new theorical occupancy, ratio)
-    // """
     int active_warps_per_SM = blocksPerSM * warpsPerBlock;
     float theoretical_occupancy = active_warps_per_SM / warpsPerMultiprocessor;
     return {theoretical_occupancy, theoretical_occupancy / occupancy};
@@ -78,13 +76,13 @@ public:
     // }
   }
 
-  std::array<int, 3> boundaries()
+  /**
+   * Return the GPU boundaries such as the warps per multiprocessor, the register per block, and shared memory per block.
+   * Returns:
+   *  List[int]: ["warps_per_block", "regs_per_block", "shared_memory_per_block"]
+   */
+  std::vector<int> boundaries() const
   {
-    // """Return the GPU boundaries such as the warps per multiprocessor, the register per block, and shared memory per block.
-
-    // Returns:
-    //   List[int]: ["warps_per_block", "regs_per_block", "shared_memory_per_block"]
-    // """
     return {warpsPerMultiprocessor, registerFileSize, sharedMemoryPerMultiprocessor};
   }
 
@@ -226,5 +224,4 @@ public:
   }
 };
 
-
-#endif  // OCCUPANCY_H
+#endif // OCCUPANCY_H

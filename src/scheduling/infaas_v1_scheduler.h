@@ -6,10 +6,10 @@
 #include "utils/general.h"
 #include "utils/datastore.h"
 
-class INFaaSScheduler : public Scheduler
+class INFaaSV1Scheduler : public Scheduler
 {
 public:
-  INFaaSScheduler() {}
+  INFaaSV1Scheduler() {}
 
   std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates) override
   {
@@ -18,12 +18,12 @@ public:
 
   /**
    * This function takes the query's requirements, and the output is the variant and worker to serve the query.
-    INFaaS considers variants in the Inactive state: getVariant first enquires the Metadata Store and retrieves the variant with the lowest combined loading and inference latency that matches the query's requirements (Line 5).
+    INFaaSV1 considers variants in the Inactive state: getVariant first enquires the Metadata Store and retrieves the variant with the lowest combined loading and inference latency that matches the query's requirements (Line 5).
    */
   std::pair<Model *, Worker *> get_variant(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates)
   {
     /**
-     * INFaaS considers variants in the Inactive state: getVariant first enquires the Metadata Store and retrieves the variant with the lowest combined loading and inference latency that matches the query's requirements.
+     * INFaaSV1 considers variants in the Inactive state: getVariant first enquires the Metadata Store and retrieves the variant with the lowest combined loading and inference latency that matches the query's requirements.
      * The available resources on the worker limit the number of variant instances it can run (Constraint #3).
      */
     std::vector<std::pair<Model *, Worker *>> current_workers;
@@ -79,7 +79,7 @@ public:
 
     if (current_workers.empty())
     {
-      spdlog::debug("🤕[INFaaS] Warning no variant candidate found for {}", variant_candidates[0]);
+      spdlog::debug("🤕[INFaaSV1] Warning no variant candidate found for {}", variant_candidates[0]);
       return {nullptr, nullptr};
     }
 

@@ -27,7 +27,7 @@ private:
   float achieved_throughput_ = 0.0;
   map<int, float> throughput_;
   map<int, unsigned long> memory_;
-  map<int, std::vector<NcuKernel *>> kernels_;
+  map<int, std::vector<Kernel *>> kernels_;
 
 public:
   int id;
@@ -77,7 +77,7 @@ public:
   {
   }
 
-  std::vector<NcuKernel *> get_kernels(int bs = 0) const
+  std::vector<Kernel *> get_kernels(int bs = 0) const
   {
     if (bs == 0)
     {
@@ -88,7 +88,7 @@ public:
     {
       return it->second;
     }
-    return std::vector<NcuKernel *>();
+    return std::vector<Kernel *>();
   }
 
   float input_rate()
@@ -104,7 +104,7 @@ public:
   float initial_duration() const
   {
     float value = 0.0;
-    for (const NcuKernel *it : get_kernels())
+    for (const Kernel *it : get_kernels())
     {
       value += it->duration;
     }
@@ -125,7 +125,7 @@ public:
     achieved_throughput_ = achieved_throughput_;
   }
 
-  void set_kernels(std::vector<NcuKernel *> kernels, int bs = 0)
+  void set_kernels(std::vector<Kernel *> kernels, int bs = 0)
   {
     if (bs == 0)
     {
@@ -134,7 +134,7 @@ public:
     kernels_[bs] = kernels;
   }
 
-  std::vector<NcuKernel *> &get_kernels(int bs = 0)
+  std::vector<Kernel *> &get_kernels(int bs = 0)
   {
     if (bs == 0)
     {
@@ -143,7 +143,7 @@ public:
     return kernels_[bs];
   }
 
-  std::map<int, std::vector<NcuKernel *>> *get_all_kernels()
+  std::map<int, std::vector<Kernel *>> *get_all_kernels()
   {
     return &kernels_;
   }

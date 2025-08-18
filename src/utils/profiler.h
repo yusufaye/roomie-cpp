@@ -5,14 +5,13 @@
 #include <string>
 #include <fstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include "csv.h"
 #include "math.h"
 #include "general.h"
 #include "kernels.h"
 #include "datastore.h"
 #include "constants.h"
-
-#include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
 
@@ -54,13 +53,13 @@ void set_profiled_kernels(Model &model, std::string data_path = "data/traces")
         spdlog::error("⛔️ Error loading profiled data from {}\n\t{}", fullpath, e.what());
         return;
     }
-    NcuKernel *kernel;
+    Kernel *kernel;
     for (const auto &item : j)
     {
-        std::vector<NcuKernel *> kernels;
+        std::vector<Kernel *> kernels;
         for (const auto &k : item["kernels"])
         {
-            kernel = new NcuKernel();
+            kernel = new Kernel();
             kernel->kernel_name = k["kernel_name"];
             kernel->block_dim_x = k["block_dim_x"];
             kernel->block_dim_y = k["block_dim_y"];

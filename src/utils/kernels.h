@@ -6,10 +6,10 @@
 #include <string>
 #include "occupancy.h"
 
-class NcuKernel
+class Kernel
 {
 public:
-  NcuKernel() {}
+  Kernel() {}
   std::string kernel_name;
   // Grid dims
   int grid_dim_x;
@@ -45,24 +45,15 @@ public:
   {
     return block_dim_x * block_dim_y * block_dim_z;
   }
-};
 
-class Operation : public NcuKernel
-{
-private:
-  Perf perf_;
 
-public:
+  /* SPECIFIC TO ROOMIE */
+
   int xxx_order;
   int xxx_max_blocks_granted;
   int xxx_duration;
   int xxx_extended_duration;
   int xxx_additional_duration;
-
-  Operation()
-  {
-    reset();
-  }
 
   Perf get_perf()
   {
@@ -94,28 +85,30 @@ public:
     return perf_.max_blocks;
   }
 
-  map<std::string, int> resource_required_per_block()
+  // std::map<std::string, int> resource_required_per_block()
+  // {
+  //   return perf_.resource_required_per_block;
+  // }
+
+  /**
+   * Return the GPU resources required such as the warps per multiprocessor, the register per block, and shared memory per block.
+   * Returns:
+   *  List[int]: ["warps_per_block", "regs_per_block", "shared_memory_per_block"]
+   */
+  std::vector<int> resource_required_per_block()
   {
-    return perf_.resource_required_per_block;
+    return {
+      perf_.resource_required_per_block["warps_per_block"],
+      perf_.resource_required_per_block["regs_per_block"],
+      perf_.resource_required_per_block["shared_memory_per_block"],
+    };
   }
 
-  std::array<int, 4> resources_per_block()
-  {
-    // """Return the GPU resources required such as the warps per multiprocessor, the register per block, and shared memory per block.
-
-    // Returns:
-    //   List[int]: ["warps_per_block", "regs_per_block", "shared_memory_per_block"]
-    // """
-    return {perf_.resource_required_per_block["warps_per_block"], perf_.resource_required_per_block["regs_per_block"], perf_.resource_required_per_block["shared_memory_per_block"]};
-  }
-
+  /**
+   * Duration with respect to the interference.
+   */
   float duration_after_interference()
   {
-    // """Duration with respect to the interference.
-
-    // Returns:
-    //     float: _description_
-    // """
     return duration + xxx_additional_duration;
   }
 
@@ -127,6 +120,9 @@ public:
     xxx_extended_duration = duration; // additional duration
     xxx_additional_duration = 0.0;    // additional duration
   }
+
+private:
+  Perf perf_;
 };
 
-#endif  // KERNELS_H
+#endif // KERNELS_H
