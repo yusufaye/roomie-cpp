@@ -1,17 +1,20 @@
-#ifndef ROOMIE_V2_SCHEDULER_H
-#define ROOMIE_V2_SCHEDULER_H
+#ifndef ROOMIE_V1_SCHEDULER_H
+#define ROOMIE_V1_SCHEDULER_H
 
 #include <math.h>
 #include <random>
 #include <algorithm>
+#include "base_scheduler.h"
 #include "utils/general.h"
 #include "utils/datastore.h"
-#include "roomie_v1_scheduler.h"
 
-class RoomieV2Scheduler : public RoomieV1Scheduler
+class RoomieV1Scheduler : public Scheduler
 {
+private:
+  std::map<std::string, std::vector<float>> history_;
+
 public:
-  RoomieV2Scheduler() {}
+  RoomieV1Scheduler() {}
 
   std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates, bool scaling = false) override
   {
@@ -24,6 +27,22 @@ public:
       for (const auto &item : result)
       {
         simulations.push_back(item);
+      }
+    }
+
+    if (scaling && !simulations.empty())
+    {
+      for (auto it = simulations.begin(); it != simulations.end();)
+      {
+        if (maximum(std::get<2>(*it)) > 0.5) /* 1. Ensure that any variant doesn't have a perf drop beyond a certain threshold. */
+        // if (mean(std::get<2>(*it)) > 0.25) /* 2. Or, ensure that on average the perf drop is under a certain threshold. */
+        {
+          it = simulations.erase(it);
+        }
+        else
+        {
+          ++it;
+        }
       }
     }
 
@@ -78,6 +97,43 @@ public:
     }
 
     return {std::get<0>(best), std::get<1>(best)};
+  }
+
+  std::vector<std::tuple<Model *, Worker *, std::vector<float>>> simulate(
+      const std::vector<Worker *> &workers,
+      std::string &variant_name)
+  {
+    std::vector<std::tuple<Model *, Worker *, std::vector<float>>> results;
+
+    for (Worker *worker : workers)
+    {
+      auto computations = this->compute(variant_name, worker);
+      for (std::pair<Model *, std::vector<float>> item : computations)
+      {
+        results.push_back({item.first, worker, item.second});
+      }
+    }
+
+    return results;
+  }
+
+  std::string build_key(const string &hardware_platform, const std::vector<Model *> &models)
+  {
+    std::vector<std::string> parts;
+    for (const auto &item : models)
+    {
+      parts.push_back(item->name + "_" + std::to_string(item->batch_size));
+    }
+
+    std::sort(parts.begin(), parts.end());
+
+    std::string key = parts[0];
+    for (size_t i = 1; i < parts.size(); ++i)
+    {
+      key += "+" + parts[i];
+    }
+
+    return hardware_platform + "_" + key; // assuming Worker has to_string()
   }
 
   std::pair<std::vector<double>, std::vector<double>> heuristic_roomie(std::vector<Model *> &models)
@@ -150,7 +206,10 @@ public:
             {
               if ((occupancies[i][k_i] + occupancies[j][k_j]) > 1.0)
               {
-                delayed += occupancies[i][k_i] / (occupancies[i][k_i] + occupancies[j][k_j]) * model_kernel_durations[i][k_i];
+                std::vector<double> val = {model_kernel_durations[i][k_i], model_kernel_durations[j][k_j]};
+                auto addition_duration = occupancies[i][k_i] / (occupancies[i][k_i] + occupancies[j][k_j]) * mean(val);
+
+                delayed += addition_duration;
               }
               k_i++;
             }
@@ -165,6 +224,69 @@ public:
 
     return {durations, new_durations};
   }
+
+  std::vector<std::pair<Model *, std::vector<float>>> compute(std::string &variant_name, Worker *&worker)
+  {
+    std::vector<std::pair<Model *, std::vector<float>>> results;
+    Model *variant;
+    for (int batch_size : BATCH_SIZES)
+    {
+      variant = new Model(*this->load_model_metadata(worker->get_hardware_platform(), variant_name));
+      variant->batch_size = batch_size;
+
+      if (worker->percent_occupation(variant->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY || variant->get_throughput() == 0)
+      {
+        continue;
+      }
+
+      std::vector<Model *> models;
+      std::vector<float> perf_drops;
+
+      if (worker->get_total_running_variants() > 0)
+      {
+        models.push_back(variant);
+        for (const auto item : worker->get_variants())
+        {
+          models.push_back(item);
+        }
+
+        std::string key = this->build_key(worker->get_hardware_platform(), models);
+
+        if (history_.find(key) != history_.end())
+        {
+          perf_drops = history_[key];
+          results.push_back({variant, perf_drops});
+          continue;
+        }
+
+        auto [durations, new_durations] = heuristic_roomie(models);
+
+        if (new_durations < durations)
+        {
+          std::string oss = "Bad algorithms for ";
+          for (auto *model : models)
+          {
+            oss += "(" + model->name + ", " + std::to_string(model->batch_size) + ") ";
+          }
+          oss += "\n\tDurations: " + vec2str(durations) + "\n\tNew durations: " + vec2str(new_durations);
+          throw std::runtime_error(oss);
+        }
+
+        for (size_t i = 0; i < new_durations.size(); i++)
+        {
+          perf_drops.push_back((new_durations[i] - durations[i]) / durations[i]);
+        }
+        history_[key] = perf_drops;
+      }
+      else
+      {
+        perf_drops = {0.0};
+      }
+      results.push_back({variant, perf_drops});
+    }
+
+    return results;
+  }
 };
 
-#endif // ROOMIE_V2_SCHEDULER_H
+#endif // ROOMIE_V1_SCHEDULER_H

@@ -26,6 +26,7 @@ private:
   int scale_;
   std::string path_;
   double duration_;
+  Event event_;
 
 public:
   void configure(const json config)
@@ -38,17 +39,31 @@ public:
     path_ = params["path"];
   }
 
+  void push(const Message &msg) override
+  {
+    spdlog::debug("✉️ [Query-Gen] Receiving message: {}", msg.get_type());
+    if (msg.get_type() == "HELLO")
+    {
+      event_.set();
+    }
+  }
+
   void run()
   {
-    spdlog::info("--- Poisson - Zipf Query Generator ---\n\t* path: {}\n\t* scale: {}\n\t* duration: {}", path_, scale_, duration_);
+    spdlog::debug("--- Poisson - Zipf Query Generator ---\n\t* path: {}\n\t* scale: {}\n\t* duration: {}", path_, scale_, duration_);
     std::map<std::string, std::string> regis_data;
     for (const auto &name : domain_)
     {
       regis_data[name] = name;
     }
-    Message msg("REGISTER", regis_data);
+    Message msg("REGISTER", domain_);
     outgoing_[0]->push(msg);
 
+    spdlog::info("1. Will wait for the controller");
+    // event_.wait(); // Wait for the controller to set.
+    std::this_thread::sleep_for(std::chrono::seconds(90));
+
+    spdlog::info("2. Sending requests will start");
     std::string names = "";
     for (const auto name : domain_)
     {
@@ -84,7 +99,7 @@ public:
         break;
       }
     }
-    exit(0);
+    spdlog::info("3. Evaluation terminated");
   }
 
 private:
@@ -95,7 +110,7 @@ private:
     std::unordered_map<int, std::vector<std::pair<double, double>>> data;
     try
     {
-      io::CSVReader<3> in(WORKDIR + filepath);
+      io::CSVReader<3> in(filepath);
       in.read_header(io::ignore_extra_column, "delay", "timestamp", "model");
       double timestamp;
       double delay;
@@ -137,7 +152,7 @@ private:
     while (true)
     {
       int start_total = 0;
-      int end_total   = 0;
+      int end_total = 0;
       for (const auto [_, count] : counter_)
       {
         start_total += count;
@@ -147,7 +162,7 @@ private:
       {
         end_total += count;
       }
-      spdlog::info("QPS: {}", end_total - start_total);
+      spdlog::debug("QPS: {}", end_total - start_total);
     }
   }
 };

@@ -21,18 +21,15 @@
 #include "scheduling/base_scheduler.h"
 #include "scheduling/usher_scheduler.h"
 #include "scheduling/infaas_scheduler.h"
+#include "scheduling/infaas_v1_scheduler.h"
 #include "scheduling/roomie_scheduler.h"
+#include "scheduling/roomie_v1_scheduler.h"
+#include "scheduling/roomie_v2_scheduler.h"
+#include "scheduling/roomie_v3_scheduler.h"
 #include "scheduling/least_loaded_scheduler.h"
 #include "scheduling/less_running_variants_scheduler.h"
 
 using namespace std::chrono;
-
-enum class Approach
-{
-  ROOMIE,
-  INFAAS,
-  USHER
-};
 
 class Controller : public Engine
 {
@@ -41,25 +38,38 @@ public:
   {
     Engine::configure(config);
 
-    if (config_["parameters"]["scheduling"] == "INFaaSSchaduling")
+    const std::string sched = config_["parameters"]["scheduling"];
+    if (sched == "infaas")
     {
       scheduler_ = new INFaaSScheduler();
     }
-    else if (config_["parameters"]["scheduling"] == "UsherSchaduling")
+    else if (sched == "infaas_v1")
+    {
+      scheduler_ = new INFaaSV1Scheduler();
+    }
+    else if (sched == "usher")
     {
       scheduler_ = new UsherScheduler();
     }
-    else if (config_["parameters"]["scheduling"] == "LeastLoadedSchaduling")
+    else if (sched == "roomie")
     {
-      scheduler_ = new LeastLoadedScheduler();
+      scheduler_ = new RoomieScheduler();
     }
-    else if (config_["parameters"]["scheduling"] == "LessRunningVariantsScheduling")
+    else if (sched == "roomie_v1")
     {
-      scheduler_ = new LessRunningVariantsScheduler();
+      scheduler_ = new RoomieV1Scheduler();
+    }
+    else if (sched == "roomie_v2")
+    {
+      scheduler_ = new RoomieV2Scheduler();
+    }
+    else if (sched == "roomie_v3")
+    {
+      scheduler_ = new RoomieV3Scheduler();
     }
     else
     {
-      scheduler_ = new RoomieScheduler();
+      throw std::runtime_error("⛔️[controller] Please provide a valid scheduling " + sched);
     }
 
     incoming2_ = new InPort(get_incoming()[0]->get_host(), get_incoming()[0]->get_port() + 1, [this](Message msg)
@@ -67,19 +77,22 @@ public:
 
     for (const auto &outport : outgoing_)
     {
-      networking_[outport->getId()] = outport;
-      Worker *worker = new Worker(outport->getId());
-      worker->set_state(State::UNSET);
-      datastore_.register_worker(worker);
+      if (outport->getId() > 0)
+      {
+        networking_[outport->getId()] = outport;
+        Worker *worker = new Worker(outport->getId());
+        worker->set_state(State::UNSET);
+        datastore_.register_worker(worker);
+      }
     }
-    const std::string logpath = config_["parameters"]["log_dir"].get<std::string>() + "/controller.csv";
+    std::string logpath = config_["parameters"]["log_dir"].get<std::string>() + "/controller.csv";
     // Create a logger
     async_file_ = spdlog::basic_logger_mt<spdlog::async_factory>("async_file_logger", logpath, true);
-    spdlog::warn("👉[controller] Controller will be saving log to {}", logpath);
+    spdlog::debug("👉[controller] Controller will be saving log to {}", logpath);
     // Set a custom format string
     async_file_->set_pattern("%v");
     async_file_->set_level(spdlog::level::debug);
-    async_file_->debug("{},{},{}", "timestamp", "in_sys_timestamp", "app_id");
+    async_file_->debug("{},{},{}", "timestamp", "query_gen_timestamp", "name");
   }
 
   void run() override
@@ -139,7 +152,10 @@ public:
         int worker_id = msg.get_data()["worker_id"];
         double total_mem = msg.get_data()["total_mem"];
         std::string hardware_platform = msg.get_data()["hardware_platform"];
+        int major = msg.get_data()["major"];
+        int minor = msg.get_data()["minor"];
         Worker *worker = datastore_.get_worker(worker_id);
+        worker->set_gpu_spec(major, minor);
         worker->set_total_memory(total_mem / 2);
         worker->set_hardware_platform(hardware_platform);
         worker->set_state(State::SET);
@@ -193,30 +209,76 @@ public:
       {
         Message msg = registration_queue_.pop(); // blocks until message arrives
         spdlog::debug("👉[controller] New registration {}", msg.to_string());
-        std::map<std::string, std::string> variant_names = msg.get_data(); // assumed typed extraction
-        int i(1);
-        for (const auto [app_id, variant_name] : variant_names)
+        std::vector<std::string> domain = msg.get_data(); // assumed typed extraction
+        std::vector<std::thread> loading_threads;
+        std::vector<std::thread> threads;
+
+        for (const auto &app_id : domain)
         {
-          datastore_.register_app(variant_name, variant_name);
+          auto hardware_platform = this->datastore_.get_workers()[0]->get_hardware_platform();
+          threads.emplace_back([this, app_id, hardware_platform]()
+                               { this->scheduler_->load_model_metadata(hardware_platform, app_id); });
+        }
+        for (auto &thread : threads)
+        {
+          if (thread.joinable())
+          {
+            thread.join();
+          }
+        }
+
+        int i(1);
+        for (const auto &app_id : domain)
+        {
+          datastore_.register_app(app_id, app_id);
           std::vector<Worker *> workers = datastore_.get_workers();
           std::vector<std::string> names;
           for (const auto name : datastore_.get_registered(app_id))
           {
             names.push_back(name);
           }
+          // [TODO] DEBUG
+          // for (size_t i = 0; i < 3; i++)
+          // {
+          //   if (bernoulli(0.5))
+          //   {
+          //     auto [variant, worker] = scheduler_->schedule(workers, names);
+          //     if (variant == nullptr || worker == nullptr)
+          //     {
+          //       spdlog::warn("🤕[controller] Warning no variant candidate found for\n\t{}", app_id);
+          //       continue;
+          //     }
+          //     deploy(app_id, *variant, *worker);
+          //   }
+          // }
+
+          auto startTime = chrono::high_resolution_clock::now();
           auto [variant, worker] = scheduler_->schedule(workers, names);
+          auto endTime = chrono::high_resolution_clock::now();
+          auto elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(endTime - startTime).count();
+
           if (variant == nullptr || worker == nullptr)
           {
-            spdlog::warn("🤕[controller] Warning no variant candidate found for\n\t{}", app_id);
+            spdlog::error("🤕[controller] Warning no variant candidate found for\n\t{}", app_id);
             continue;
           }
           deploy(app_id, *variant, *worker);
 
-          forward_query_threads_.emplace_back([this, variant_name]()
+          forward_query_threads_.emplace_back([this, app_id]()
                                               {
-                                                query_daemon(variant_name); // starts query loop per variant
+                                                query_daemon(app_id); // starts query loop per variant
                                               });
-          spdlog::debug("👉[controller] Registered app {} {}/{}", app_id, i++, variant_names.size());
+          spdlog::debug("👉[controller] Registered app {} {}/{}, elapsed: {:.2f} (s)", app_id, i++, domain.size(), elapsed);
+        }
+
+        /* Notify the query generator. */
+        for (const auto &outport : outgoing_)
+        {
+          if (outport->getId() == 0)
+          {
+            Message ready_msg("HELLO");
+            outport->push(ready_msg);
+          }
         }
 
         autoscaler_->set_event();
@@ -236,7 +298,7 @@ public:
       {
         auto msg = profiling_queue_.pop(); // [TODO] Update load balancing weights.
 
-        int worker_id = msg.get_data()["worker_id"];
+        int worker_id = msg.get_data()["worker_id"].get<int>();
         for (auto worker : datastore_.get_workers())
         {
           std::vector<json> items = msg.get_data()["variants"];
@@ -249,6 +311,7 @@ public:
               continue;
             }
             variant->set_achieved_throughput(item["throughput"].get<float>());
+            variant->qsize = item["qsize"].get<int>();
             auto input_rates = item["input_rates"].get<std::vector<int>>();
             for (size_t i = 0; i < input_rates.size(); i++)
             {
@@ -328,15 +391,7 @@ public:
       Message msg("DEPLOY", {{"id", variant.id}, {"name", variant.name}, {"batch_size", variant.batch_size}});
       send(worker, msg);
       spdlog::debug("👉[controller] New deployment done for {}", app_id);
-      int counter = 0;
-      for (const auto worker : datastore_.get_workers())
-      {
-        if (worker->get_total_running_variants() > 0)
-        {
-          counter++;
-        }
-      }
-      spdlog::warn("👉[controller] Used worker {}/{}", counter, datastore_.get_workers().size());
+      spdlog::debug("👉[controller] Summary: {}", datastore_.to_string());
     }
     catch (const std::exception &e)
     {
@@ -350,6 +405,7 @@ public:
     send(worker, msg);
     datastore_.remove(worker.get_id(), &variant);
     spdlog::debug("👉[controller] Will stop {} at {}", variant.to_string(), worker.to_string());
+    spdlog::debug("👉[controller] Summary: {}", datastore_.to_string());
   }
 
   void send(Worker &worker, const Message &msg)
@@ -363,16 +419,16 @@ public:
     while (true)
     {
       std::optional<std::string> key = loadb_.next(app_id);
-
       if (key.has_value())
       {
         auto [variant, worker] = variant_worker_map_[key.value()];
-        double timestamp = 0.0;
-        for (size_t i = 0; i < variant->batch_size; i++)
+        double timestamp = query_queue_[app_id].pop().get_timestamp();
+        for (size_t i = 1; i < variant->batch_size; i++)
         {
-          timestamp = query_queue_[app_id].pop().get_timestamp(); // blocking wait on a per-app queue
+          query_queue_[app_id].pop(); // sink
         }
-        Message msg(timestamp, "QUERY", {{"variant_id", variant->id}, {"batch_size", variant->batch_size}});
+        auto seconds = duration_cast<duration<double>>(system_clock::now().time_since_epoch()).count();
+        Message msg(seconds, "QUERY", {{"variant_id", variant->id}, {"batch_size", variant->batch_size}, {"query_gen_timestamp", timestamp}});
         send(*worker, msg);
       }
       else

@@ -1,67 +1,75 @@
 import time
-import queue
 import logging
-import threading
-
-from websockets.sync.server import serve
-from websockets.sync.client import connect
+import asyncio
+import websockets
 
 from networking.message import Message
 
 
 
-class OutPort(threading.Thread):
+class OutPort:
   def __init__(self, remote_host, remote_port):
-    super().__init__()
     logging.debug(f"[OutPort] Remote host: {remote_host}, remote port: {remote_port}")
     self.remote_host = remote_host
     self.remote_port = remote_port
     self.uri = f"ws://{self.remote_host}:{self.remote_port}"
-    self.queue = queue.Queue()
+    self.queue = asyncio.Queue()
 
-  def send(self, msg: str):
-    self.queue.put(msg)
+  async def send(self, msg: str):
+    await self.queue.put(msg)
 
-  def run(self):
+  async def connect(self):
     while True:
       try:
-        with connect(self.uri) as websocket:
+        async with websockets.connect(self.uri) as websocket:
           logging.debug(f"✅[OutPort] Connected successfully to {self.uri}!")
           try:
             while True:
-              msg: Message = self.queue.get()
+              msg: Message = await self.queue.get()
               message = msg.marshal()
-              websocket.send(message)
+              await websocket.send(message)
           except Exception as e:
-            logging.debug(f"⛔️ Connection lost to {self.uri}\n\t{e}")
+            logging.error(f"⛔️ Connection lost to {self.uri}\n\t{e}")
             break
       except (ConnectionRefusedError, OSError) as e:
           logging.error(f"⛔️[OutPort] Connection failed to host {self.remote_host} and port {self.remote_port}. Retrying in 3 seconds...")
-          time.sleep(3)
+          await asyncio.sleep(3)
+    
+  
+  def get_runners(self):
+    return [ self.connect() ]
 
-class InPort(threading.Thread):
+
+class InPort:
   def __init__(self, host, port, callback):
-    super().__init__()
     logging.debug(f"[InPort] Host: {host}, port: {port}")
     self.host     = "" # host don't set the host.
     self.port     = port
     self.callback = callback
-    self.queue = queue.Queue()
+    self.queue = asyncio.Queue()
 
-  def handler(self, websocket):
+  async def handler(self, websocket):
     try:
-      for message in websocket:
-        msg = Message()
-        msg.unmarshal(message)
-        msg.data["worker_timestamp"] = time.time()
-        self.callback(msg)
+      async for message in websocket:
+        await self.queue.put(message)
     except Exception as e:
       logging.error(f"⛔️[InPort] Error while handling message\n\t{e}")
+      
+  async def consumer(self):
+    while True:
+      message = await self.queue.get()
+      msg = Message()
+      msg.unmarshal(message)
+      msg.data["worker_timestamp"] = time.time()
+      await self.callback(msg)
 
-  def run(self):
+  async def connect(self):
     try:
-      with serve(self.handler, self.host, self.port) as server:
+      async with websockets.serve(self.handler, self.host, self.port):
         logging.debug(f"✅[InPort] Client connected to ws://{self.host}:{self.port}.")
-        server.serve_forever()
+        await asyncio.Future()  # run forever
     except Exception as e:
       logging.error(f"⛔️[InPort] Connection failed to host {self.host} and port {self.port}\n{e}")
+
+  def get_runners(self):
+    return [ self.connect(), self.consumer() ]

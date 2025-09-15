@@ -6,7 +6,6 @@ import logging
 import logging
 import warnings
 import threading
-import random
 
 try:
   import torch
@@ -63,17 +62,13 @@ class WorkerEngine:
     self.variants: Dict[int, Model]   = {}
     self.num_received: Dict[int, int] = {}
     self.deployment_queue = queue.Queue()
-    self.redeployment_queue = queue.Queue()
     self.stop_queue       = queue.Queue()
-    self.ingress_tracer   = None
-    self.inference_tracer = None
+    self.logger = None
     self.directory  = "logger"
     self.interval   = 5 # seconds
     self.outgoing: List[OutPort]  = []
     self.incoming: List[InPort]   = []
     self.queue = queue.Queue()
-    self.error: List[Model] = []
-    self.lock = threading.Lock()
   
   def configure(self, config):
     self.id: int = config["id"]
@@ -82,7 +77,7 @@ class WorkerEngine:
     if "log_dir" in self.parameters.keys():
       self.directory = self.parameters["log_dir"]
     if self.config["host"] and self.config["port"]:
-      inport = InPort(host=self.config["host"], port=self.config["port"], callback=self.queue.put)
+      inport = InPort(host=self.config["host"], port=self.config["port"], callback=self.push)
       self.incoming.append(inport)
     for item in self.config["remote_engines"]:
       outport = OutPort(remote_host=item["remote_host"], remote_port=item["remote_port"])
@@ -92,7 +87,6 @@ class WorkerEngine:
       self.device = int(self.parameters["device"])
     else:
       self.device = 0
-    torch.cuda.set_device(self.device)
     logging.debug(f"👉[WORKER] Given device is {self.device}👈")
     if not torch.cuda.is_available():
       logging.error(">>> CUDA is not available <<<")
@@ -110,27 +104,18 @@ class WorkerEngine:
     else:
       logging.warning("GPU is not available")
       return 0, 0
+    
+  def push(self, msg: Message):
+    self.queue.put(msg)
   
   def start(self):
     while True:
       msg: Message = self.queue.get()
-      if self.error and random.random() > .95:
-        for model in self.error:
-          logging.warning(f"[{self.id}] error with Model({model.id}, {model.name}), while task {self.running[model.id].is_alive()}")
       logging.debug(f"✉️[WORKER] Recv: {msg}")
       if msg.type == "QUERY":
         if msg.data["variant_id"] in self.inference_queue.keys():
           self.inference_queue[msg.data["variant_id"]].put(msg)
           self.num_received[msg.data["variant_id"]] += msg.data["batch_size"]
-        self.ingress_tracer.log({
-          "timestamp": time.time(),
-          "controller_timestamp": msg.timestamp,
-          "query_gen_timestamp": msg.data["query_gen_timestamp"],
-          "worker_timestamp": msg.data["worker_timestamp"],
-          "worker_id": self.id,
-          "variant_id": msg.data["variant_id"],
-          "batch_size": msg.data["batch_size"],
-          })
       elif msg.type == "DEPLOY":
         self.deployment_queue.put(msg)
       elif msg.type == "STOP":
@@ -148,18 +133,12 @@ class WorkerEngine:
         self.total_mem = total_memory
         hello_msg = Message (0, "HELLO", {"worker_id": self.id, "hardware_platform": self.hardware_platform, "gpu_name": self.gpu_name, "total_mem": self.total_mem, "major": self.major , "minor": self.minor})
         self.outgoing[0].send(hello_msg)
-        self.ingress_tracer = Logger(
-          header=[ "timestamp", "controller_timestamp", "query_gen_timestamp", "worker_timestamp", "worker_id", "variant_id", "batch_size" ],
+        self.logger = Logger(
+          header=["timestamp", "controller_timestamp", "query_gen_timestamp", "worker_timestamp", "worker_id", "variant_id", "name", "throughput", "batch_size", "qsize" ],
           directory=self.config["parameters"]["log_dir"],
-          filename="worker-ingress-trace-{}.csv".format(self.id),
+          filename="worker-{}.csv".format(self.id),
           )
-        self.ingress_tracer.start()
-        self.inference_tracer = Logger(
-          header=[ "timestamp", "query_gen_timestamp", "worker_timestamp", "worker_id", "variant_id", "name", "throughput", "batch_size", "qsize", ],
-          directory=self.config["parameters"]["log_dir"],
-          filename="worker-inference-{}.csv".format(self.id),
-          )
-        self.inference_tracer.start()
+        self.logger.start()
       else:
         ValueError("Unknown the given value of the type -> {}.".format(msg.type))
     
@@ -173,7 +152,7 @@ class WorkerEngine:
         for key, num_recv in input_rate.items():
           self.variants[key].input_rates[1:]  = self.variants[key].input_rates[0:-1]
           self.variants[key].input_rates[0]   = self.num_received[key] - num_recv
-          self.variants[key].qsize            = self.get_qsize(self.variants[key])
+          self.variants[key].qsize            = self.inference_queue[key].qsize()
       except: pass
   
   def monitor_daemon(self):
@@ -221,31 +200,17 @@ class WorkerEngine:
     except Exception as e:
       logging.error(f"⛔️ Error while trying to stop variant\n\t{e}")
   
-  def redeployment_daemon(self):
-    try:
-      while True:
-        model: Model = self.redeployment_queue.get()
-        task = threading.Thread(target=self.run_inference, kwargs={ "model": model })
-        task.start()
-        self.running[model.id] = task
-        logging.debug(f"Redeployed {model.name}...")
-        # msg = Message(0, "DEPLOYED", { "worker_id": self.id, "free_memory": free_memory, "total_memory": total_memory })
-        # await self.outgoing[0].send(msg)
-    except Exception as e:
-      logging.error(f"⛔️ Error on deploying daemon\n\t{e}")
-  
   def deployment_daemon(self):
     try:
       while True:
         msg: Message = self.deployment_queue.get()
-        model = Model(id=int(msg.data["id"]), name=msg.data["name"], batch_size=int(msg.data["batch_size"]))
-        self.variants[model.id] = model
-        self.num_received[model.id] = 0
-        self.inference_queue[model.id] = queue.Queue()
-        task = threading.Thread(target=self.run_inference, kwargs={ "model": model })
+        model_ = Model(id=int(msg.data["id"]), name=msg.data["name"], batch_size=int(msg.data["batch_size"]))
+        self.variants[model_.id] = model_
+        self.num_received[model_.id] = 0
+        self.inference_queue[model_.id] = queue.Queue()
+        task = threading.Thread(target=self.run_inference, kwargs={ "model": model_ })
         task.start()
-        self.running[model.id] = task
-        logging.debug(f"Deployed {model.name}...")
+        self.running[model_.id] = task
         # msg = Message(0, "DEPLOYED", { "worker_id": self.id, "free_memory": free_memory, "total_memory": total_memory })
         # await self.outgoing[0].send(msg)
     except Exception as e:
@@ -253,58 +218,46 @@ class WorkerEngine:
       
   def run_inference(self, model: Model):
     try:
-      self.lock.acquire() # To prevent _ModuleLock deadlock exception.
-      try: 
-        stream = torch.cuda.Stream(device=self.device)
-        module = torch.load("/usmb/roomie/data/models/{}.pth".format(model.name))
-        module = module.eval().cuda(device=self.device).to(torch.float32)
-      finally: 
-        self.lock.release()
-      
+      stream = torch.cuda.Stream(device=self.device)
+      module: torch.nn.Module = torch.load("/usmb/roomie/data/models/{}.pth".format(model.name))
+      module = module.eval().cuda(device=self.device)
       free_memory, _ = self.get_memory()
       logging.debug(f"⚠️ [worker] New deployment on Worker-{self.id} device {self.device}\n\t| Name: {model.name}\n\t| Batch-size: {model.batch_size}\n\t| Free-memory: {free_memory / (1024.0 * 1024)} MB")
       with torch.cuda.stream(stream):
-        input_tensor = torch.randn(size=(model.batch_size, 3, 224, 224)).cuda(device=self.device).to(torch.float32)
+        input_tensor = torch.randn(size=(model.batch_size, 3, 224, 224), device=self.device)
         with torch.no_grad():
           while True:
             msg: Message = self.inference_queue[model.id].get()
             if msg == None:
-              logging.debug(f"Will terminate variant {model.name}")
               return
-            # latency = time.time() - msg.data["worker_timestamp"]
             elapsed = time.time()
             try:
               module(input_tensor)
-              torch.cuda.synchronize()
-            except RuntimeError as e:
-              continue
+            except RuntimeError as e: pass
             elapsed = time.time() - elapsed
             model.throughput = model.batch_size / elapsed
-            self.inference_tracer.log({
+            self.logger.log({
               "timestamp": time.time(),
-              "query_gen_timestamp": msg.data["query_gen_timestamp"],
+              "controller_timestamp": msg.timestamp,
+              "query_gen_timestamp": msg.data["timestamp"],
               "worker_timestamp": msg.data["worker_timestamp"],
-              "name": model.name,
               "worker_id": self.id,
-              "variant_id": msg.data["variant_id"],
-              "batch_size": msg.data["batch_size"],
+              "variant_id": model.id,
+              "name": model.name,
               "throughput": model.throughput,
-              "qsize": self.get_qsize(model),
+              "batch_size": msg.data["batch_size"],
+              "qsize": self.inference_queue[model.id].qsize(),
               })
-            # logging.info(f"{model.name}\tLatency: {latency:.5f} (s)\tThr: {model.throughput:0f}\tQsize: {self.get_qsize(model)}")
+            # logging.info(f"{model.name}\tIn-sys: {insys_elapsed:.5f}\tThr: {model.throughput:.0f}\tQsize: {self.inference_queue[model.id].qsize()}")
     except Exception as e:
       if isinstance(e, KeyError):
         pass
       elif isinstance(e, RuntimeError):
-        # shutil.rmtree(self.inference_tracer.directory)
-        
-        logging.error(f"⛔️ [{self.id}] Error during inference Model({model.id}, {model.name}) {len(self.variants)}x models\n\td{e}")
-        self.redeployment_queue.put(model)
+        logging.error(f"⛔️ [{model.name}] Error during inference, remaining {[item.id for item in self.variants.values()]}\n\t{type(e)}\n\t{e}")
+        exit(1)
       else:
         logging.error(f"⛔️ Unknown type of exception\n\t{type(e)}\n\t{e}")
-  
-  def get_qsize(self, model: Model) -> int:
-    return self.inference_queue[model.id].qsize() * model.batch_size
+        exit(1)
   
   def run(self):
     tasks = [ 
@@ -312,10 +265,9 @@ class WorkerEngine:
       threading.Thread(target=self.monitor_daemon, kwargs={}), 
       threading.Thread(target=self.start, kwargs={}), 
       threading.Thread(target=self.deployment_daemon, kwargs={}), 
-      threading.Thread(target=self.redeployment_daemon, kwargs={}), 
       threading.Thread(target=self.stop_daemon, kwargs={}) ]
     tasks += self.incoming + self.outgoing
     for task in tasks:
       task.start()
     for task in tasks:
-      task.join()
+      task.join()  

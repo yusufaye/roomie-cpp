@@ -54,30 +54,37 @@ void set_profiled_kernels(Model &model, std::string data_path = "data/traces")
         return;
     }
     Kernel *kernel;
-    for (const auto &item : j)
+    try
     {
-        std::vector<Kernel *> kernels;
-        for (const auto &k : item["kernels"])
+        for (const auto &item : j)
         {
-            kernel = new Kernel();
-            kernel->kernel_name = k["kernel_name"];
-            kernel->block_dim_x = k["block_dim_x"];
-            kernel->block_dim_y = k["block_dim_y"];
-            kernel->block_dim_z = k["block_dim_z"];
-            kernel->grid_dim_x = k["grid_dim_x"];
-            kernel->grid_dim_y = k["grid_dim_y"];
-            kernel->grid_dim_z = k["grid_dim_z"];
-            kernel->register_per_thread = k["register_per_thread"];
-            kernel->duration = k["duration"];
-            kernel->shared_memory = k["shared_memory"];
-            kernel->achieved_occupancy = k["achieved_occupancy"];
-            kernel->achieved_active_warps_per_SM = k["achieved_active_warps_per_SM"];
-            kernel->capability_minor = k["capability_minor"];
-            kernel->capability_major = k["capability_major"];
-            kernels.push_back(kernel);
+            std::vector<Kernel *> kernels;
+            for (const auto &k : item["kernels"])
+            {
+                kernel = new Kernel();
+                kernel->kernel_name = k["kernel_name"];
+                kernel->block_dim_x = k["block_dim_x"];
+                kernel->block_dim_y = k["block_dim_y"];
+                kernel->block_dim_z = k["block_dim_z"];
+                kernel->grid_dim_x = k["grid_dim_x"];
+                kernel->grid_dim_y = k["grid_dim_y"];
+                kernel->grid_dim_z = k["grid_dim_z"];
+                kernel->register_per_thread = k["register_per_thread"];
+                kernel->duration = k["duration"];
+                kernel->shared_memory = k["shared_memory"];
+                kernel->achieved_occupancy = k["achieved_occupancy"];
+                kernel->achieved_active_warps_per_SM = k["achieved_active_warps_per_SM"];
+                kernel->capability_minor = k["capability_minor"];
+                kernel->capability_major = k["capability_major"];
+                kernels.push_back(kernel);
+            }
+            model.batch_size = item["batch_size"];
+            model.set_kernels(kernels);
         }
-        model.batch_size = item["batch_size"];
-        model.set_kernels(kernels);
+    }
+    catch (const std::exception &e)
+    {
+        spdlog::error("Error while loading kernel profil data\n\t{}", e.what());
     }
 }
 

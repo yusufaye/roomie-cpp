@@ -1,5 +1,5 @@
-#ifndef ROOMIE_SCHEDULER_H
-#define ROOMIE_SCHEDULER_H
+#ifndef ROOMIE_V1_SCHEDULER_H
+#define ROOMIE_V1_SCHEDULER_H
 
 #include <math.h>
 #include <random>
@@ -8,69 +8,17 @@
 #include "utils/general.h"
 #include "utils/datastore.h"
 
-bool interfere(float prob)
-{
-  // Create a random number generator
-  static std::random_device rd;
-  static std::mt19937 gen(rd());
-  std::uniform_real_distribution<double> uniformDis(0.0, 1.0);
-  double randomNumber = uniformDis(gen);
-  if (randomNumber < prob)
-  {
-    return true;
-  }
-  else
-  {
-    return false;
-  }
-}
-
-std::vector<std::vector<double>> create_mask(const std::vector<double> &arr)
-{
-  int L = arr.size();
-  int M = std::min(static_cast<int>(std::ceil(L / 2.0)), 5);
-  M = (M % 2 == 0) ? M + 1 : M;
-  std::vector<std::vector<double>> mask(M, std::vector<double>(L, 1.0));
-  int window = M / 2;
-  for (int pad = 1; pad <= window; ++pad)
-  {
-    for (int j = 0; j < pad; ++j)
-    {
-      mask[pad - 1][j] = 0.0; /* (f)-> i=0,1,...,w; j=0,1,...,w-1*/
-    }
-    for (int j = L - pad; j < L; ++j)
-    {
-      mask[M - pad][j] = 0.0; /* (b)-> i=N-w,N-w+1,...,N-1; j=N-w,N-w+1,...,N-1*/
-    }
-  }
-  std::vector<std::vector<double>> result(M, std::vector<double>(L, 0.0));
-  for (int i = 0; i < M; ++i)
-  {
-    for (int j = 0; j < L; ++j)
-    {
-      result[i][j] = arr[j] * mask[i][j];
-    }
-  }
-
-  // e.g., of mask an array {1, 2, 3, 4, 5, 6, 7, 8}
-  // [0 2 3 4 5 6 7 8 ]
-  // |0 0 3 4 5 6 7 8 |
-  // |1 2 3 4 5 6 7 8 |
-  // |1 2 3 4 5 6 0 0 |
-  // [1 2 3 4 5 6 7 0 ]
-  return result;
-}
-
-class RoomieScheduler : public Scheduler
+class RoomieV1Scheduler : public Scheduler
 {
 private:
   std::map<std::string, std::vector<float>> history_;
 
 public:
-  RoomieScheduler() {}
+  RoomieV1Scheduler() {}
 
-  std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates) override
+  std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates, bool scaling = false) override
   {
+    std::string summary = "=== " + variant_candidates[0] + " ===";
     std::vector<std::tuple<Model *, Worker *, std::vector<float>>> simulations;
 
     for (auto &variant_name : variant_candidates)
@@ -82,25 +30,22 @@ public:
       }
     }
 
-    if (!simulations.empty())
+    if (scaling && !simulations.empty())
     {
-      auto tmp = simulations;
-      simulations.clear();
-      for (const auto item : tmp)
+      for (auto it = simulations.begin(); it != simulations.end();)
       {
-        // 1. Ensure that any variant doesn't have a perf drop beyond a certain threshold.
-        auto it = max_element(std::get<2>(item).begin(), std::get<2>(item).end());
-        if (*it <= 0.75)
+        // if (maximum(std::get<2>(*it)) > 0.5) /* 1. Ensure that any variant doesn't have a perf drop beyond a certain threshold. */
+        if (mean(std::get<2>(*it)) > 0.5) /* 2. Or, ensure that on average the perf drop is under a certain threshold. */
         {
-          simulations.push_back(item);
+          it = simulations.erase(it);
         }
-        // 2. Or, ensure that on average the perf drop is under a certain threshold.
-        // if (mean(std::get<2>(item)) <= 0.5)
-        // {
-        //   simulations.push_back(item);
-        // }
+        else
+        {
+          ++it;
+        }
       }
     }
+
     if (simulations.empty())
     {
       spdlog::debug("🤕[RoomieV1] Warning no variant candidate found");
@@ -111,13 +56,45 @@ public:
               [&](const std::tuple<Model *, Worker *, std::vector<float>> &a, const auto &b)
               {
                 Model *variant = std::get<0>(a);
-                float thr_a = (variant->get_throughput() - variant->get_throughput() * std::get<2>(a)[0]);
+                float thr_a = (variant->get_achieved_throughput() - variant->get_achieved_throughput() * std::get<2>(a)[0]);
                 variant = std::get<0>(b);
-                float thr_b = (variant->get_throughput() - variant->get_throughput() * std::get<2>(b)[0]);
+                float thr_b = (variant->get_achieved_throughput() - variant->get_achieved_throughput() * std::get<2>(b)[0]);
                 return thr_a > thr_b;
               });
+    int N = std::min((int)simulations.size(), 5);
+    for (size_t i = 0; i < N; i++)
+    {
+      const auto sim = simulations[i];
+      summary += "\n N=" + std::to_string(std::get<1>(sim)->get_total_running_variants()) + " perf=" + vec2str(std::get<2>(sim));
+    }
+    spdlog::debug("{}", summary);
 
     auto &best = simulations.front();
+
+    if (std::get<2>(best).size() > 1)
+    {
+      float current_throughput = 0.0;
+      float next_throughput = std::get<0>(best)->get_achieved_throughput() - std::get<0>(best)->get_achieved_throughput() * std::get<2>(best)[0];
+      int i = 1;
+      for (const auto &variant : std::get<1>(best)->get_variants())
+      {
+        if (variant->name == std::get<0>(best)->name)
+        {
+          current_throughput += variant->get_achieved_throughput();
+          next_throughput += variant->get_achieved_throughput() - variant->get_achieved_throughput() * std::get<2>(best)[i];
+        }
+        i++;
+      }
+      spdlog::debug("=== {} ===\n\tAchieved Throughput: {}\n\tPerf drop: {}\n\tCurrent Throughput: {}\n\tNext Throughput: {}", std::get<0>(best)->name, std::get<0>(best)->get_achieved_throughput(), vec2str(std::get<2>(best)), current_throughput, next_throughput);
+      if (isnan(std::get<2>(best)[0]))
+      {
+        spdlog::debug("=== {}->{}: {} ===", std::get<0>(best)->name, std::get<0>(best)->batch_size, vec2str(std::get<2>(best)));
+        for (const auto &variant : std::get<1>(best)->get_variants())
+        {
+          spdlog::debug("\t{}->{}", variant->name, variant->batch_size);
+        }
+      }
+    }
 
     return {std::get<0>(best), std::get<1>(best)};
   }
@@ -159,30 +136,56 @@ public:
     return hardware_platform + "_" + key; // assuming Worker has to_string()
   }
 
-  std::pair<std::vector<double>, std::vector<double>> heuristic_roomie(std::vector<Model *> &models, float prob = 0.2)
+  std::pair<std::vector<double>, std::vector<double>> heuristic_roomie(std::vector<Model *> &models)
   {
-    std::vector<double> durations;
-    std::vector<double> new_durations;
-    // std::vector<int> lengths;
-    std::vector<std::vector<std::vector<double>>> masks;
+    std::vector<double> durations, new_durations;
+    std::vector<int> lengths;
+    std::vector<std::vector<std::vector<bool>>> masks;
+    std::vector<std::vector<float>> occupancies;
 
     int N = models.size();
+
+    if (N == 1)
+    {
+      auto duration = models[0]->initial_duration();
+      durations.push_back(duration);
+      return {durations, durations};
+    }
+
+    std::vector<std::vector<double>> model_kernel_durations;
     for (int i = 0; i < N; ++i)
     {
-      durations.push_back(models[i]->initial_duration());
-      new_durations.push_back(durations[i]);
-      // lengths.push_back(models[i]->get_kernels().size());
-      std::vector<double> op_durations;
-      std::vector<float> occ;
-      for (auto &op : models[i]->get_kernels())
+      auto duration = models[i]->initial_duration();
+      durations.push_back(duration);
+      new_durations.push_back(duration);
+      auto size = models[i]->get_kernels().size();
+      if (size == 0)
       {
-        op_durations.push_back(op->duration);
+        throw runtime_error("No kernel for the following " + models[i]->to_string());
       }
-      masks.push_back(create_mask(op_durations));
+      lengths.push_back(size);
+      std::vector<double> kernel_durations;
+      std::vector<float> occ;
+      for (auto &kernel : models[i]->get_kernels())
+      {
+        kernel_durations.push_back(kernel->duration);
+        if (kernel->achieved_occupancy > 1)
+        {
+          occ.push_back(kernel->achieved_occupancy / 100);
+        }
+        else
+        {
+          occ.push_back(kernel->achieved_occupancy);
+        }
+      }
+      occupancies.push_back(occ);
+      masks.push_back(create_bool_mask(occ.size(), occ.size()));
+      model_kernel_durations.push_back(kernel_durations);
     }
 
     for (int i = 0; i < N; ++i)
     {
+      int counter = 0;
       for (int j = 0; j < N; ++j) /* model to interfere with */
       {
         if (i == j)
@@ -190,27 +193,36 @@ public:
           continue;
         }
 
-        auto mask_durations = masks[j];
-
+        std::vector<double> additianal_durations;
+        additianal_durations.resize(N, 0);
         std::vector<double> delays;
-        for (const auto &sample_dur : mask_durations)
+        for (const auto &model_mask : masks[j])
         {
           double delayed = 0.0;
-          for (size_t k = 0; k < mask_durations.size(); k++)
+          size_t k_i = 0;
+          for (size_t k_j = 0; k_j < model_mask.size(); k_j++)
           {
-            if (interfere(prob))
+            /* Early stopping is import when model with diffent size interfere. */
+            if (k_i > lengths[i])
             {
-              if (k > masks[i].size())
+              break;
+            }
+            if (model_mask[k_j])
+            {
+              if ((occupancies[i][k_i] + occupancies[j][k_j]) > 1.0)
               {
-                break;
+                std::vector<double> val = {model_kernel_durations[i][k_i], model_kernel_durations[j][k_j]};
+                auto addition_duration = occupancies[i][k_i] / (occupancies[i][k_i] + occupancies[j][k_j]) * mean(val);
+
+                delayed += addition_duration;
               }
-              delayed += sample_dur[k];
+              k_i++;
             }
           }
           delays.push_back(delayed);
         }
         /* Determine the number of time the model(j) might terminate while model(j) still executing. */
-        double overlap = std::max((double)masks[i].size() / masks[j].size() / 2, 1.0);
+        auto overlap = std::max((float)lengths[i] / lengths[j], 1.0f);
         new_durations[i] += overlap * median(delays);
       }
     }
@@ -226,6 +238,10 @@ public:
     {
       variant = new Model(*this->load_model_metadata(worker->get_hardware_platform(), variant_name));
       variant->batch_size = batch_size;
+      if (variant->get_kernels().size() == 0)
+      {
+        continue;
+      }
 
       if (worker->percent_occupation(variant->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY || variant->get_throughput() == 0)
       {
@@ -261,24 +277,13 @@ public:
           {
             oss += "(" + model->name + ", " + std::to_string(model->batch_size) + ") ";
           }
-
-          oss += "\n\tDurations=[";
-          for (size_t i = 0; i < durations.size(); i++)
-          {
-            oss += std::to_string(durations[i]) + ", ";
-          }
-          oss += "]\n\tNew durations=";
-          for (size_t i = 0; i < new_durations.size(); i++)
-          {
-            oss += std::to_string(new_durations[i]) + ", ";
-          }
-          oss += "]";
+          oss += "\n\tDurations: " + vec2str(durations) + "\n\tNew durations: " + vec2str(new_durations);
           throw std::runtime_error(oss);
         }
 
         for (size_t i = 0; i < new_durations.size(); i++)
         {
-          perf_drops.push_back((new_durations[i] - durations[i]) / new_durations[i]);
+          perf_drops.push_back((new_durations[i] - durations[i]) / durations[i]);
         }
         history_[key] = perf_drops;
       }
@@ -293,4 +298,4 @@ public:
   }
 };
 
-#endif // ROOMIE_SCHEDULER_H
+#endif // ROOMIE_V1_SCHEDULER_H

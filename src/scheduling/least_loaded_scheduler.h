@@ -10,7 +10,7 @@ class LeastLoadedScheduler : public Scheduler
 public:
   LeastLoadedScheduler() {}
 
-  std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates) override
+  std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates, bool scaling=false) override
   {
     Worker *worker = workers.front();
     for (const auto _worker : workers)

@@ -30,11 +30,7 @@ std::vector<std::vector<int>> equaly(const std::vector<std::vector<int>> &resour
   int M = boundaries.size();                   // Number of resource types
 
   std::vector<std::vector<int>> maximum_resources_granted(N, std::vector<int>(M, 0));
-  std::vector<int> free;
-  for (size_t i = 0; i < M; i++)
-  {
-    free.push_back(boundaries[i]);
-  }
+  std::vector<int> free = boundaries;
 
   // Equally distribute boundaries
   for (int i = 0; i < N; ++i)
@@ -46,31 +42,41 @@ std::vector<std::vector<int>> equaly(const std::vector<std::vector<int>> &resour
   }
 
   // Initial allocation
+  auto max_blocks_granted = max_blocks;
   for (int i = 0; i < N; ++i)
   {
-    int max_block = max_blocks[i];
     for (int j = 0; j < M; ++j)
     {
       if (resources_required_per_block[i][j] > 0)
       {
-        int possible = maximum_resources_granted[i][j] / resources_required_per_block[i][j];
-        max_block = std::min(max_block, possible);
+        max_blocks_granted[i] = std::min(max_blocks_granted[i], maximum_resources_granted[i][j] / resources_required_per_block[i][j]);
       }
     }
     for (int j = 0; j < M; ++j)
     {
-      free[j] -= resources_required_per_block[i][j] * max_block;
+      free[j] -= resources_required_per_block[i][j] * max_blocks_granted[i];
     }
   }
 
   // Reallocate unused resources
-  bool allocated = true;
+  bool allocated, can_allocate = true;
+  int i = 0;
   while (allocated)
   {
+    if (i++ == 5)
+    {
+      break;
+    }
+    spdlog::debug("Free resources: {}", vec2str(free));
+    for (int i = 0; i < N; ++i)
+    {
+      spdlog::debug("\t{}", vec2str(resources_required_per_block[i]));
+    }
     allocated = false;
     for (int i = 0; i < N; ++i)
     {
-      bool can_allocate = true;
+      can_allocate = true;
+      /* check if all resources match. */
       for (int j = 0; j < M; ++j)
       {
         if (free[j] < resources_required_per_block[i][j])
@@ -265,11 +271,12 @@ std::vector<std::vector<int>> fcfs(
 
 double duration_after_interference(Model *model)
 {
-  double new_duration = 0;
+  double new_duration = 0.0;
   for (auto &kernel : model->get_kernels())
   {
     new_duration += kernel->duration_after_interference();
   }
+
   if (model->initial_duration() > new_duration)
   {
     spdlog::error("Duration after interference should be greater or equal to initial duration (new {} < {})", new_duration, model->initial_duration());
@@ -289,29 +296,26 @@ void reset(Model *model)
 std::vector<double> simulate_interferance(
     std::vector<Model *> &models,
     const std::vector<int> boundaries,
-    Strategy strategy = Strategy::FCFS,
+    Strategy strategy = Strategy::EQUALY,
     std::vector<int> starts = {},
     bool one_interference_at_most = true,
     bool interfere_all_kernels = false,
     float prob = 0.2)
 {
+  if (models.size() == 1)
+  {
+    return {models[0]->initial_duration()};
+  }
+
   auto resource_distribution_strategy = equaly;
 
-  if (strategy == Strategy::EQUALY)
-  {
-    resource_distribution_strategy = equaly;
-  }
-  else if (strategy == Strategy::FAIRLY)
+  if (strategy == Strategy::FAIRLY)
   {
     resource_distribution_strategy = fairly;
   }
   else if (strategy == Strategy::FCFS)
   {
     resource_distribution_strategy = fcfs;
-  }
-  else
-  {
-    throw invalid_argument("Strategy unrecognized.");
   }
 
   // Reset kernel interferences.
@@ -326,15 +330,14 @@ std::vector<double> simulate_interferance(
   std::vector<float> durations;
   for (auto &model : models)
   {
-    for (auto &op : model->get_kernels())
+    for (auto &kernel : model->get_kernels())
     {
-      durations.push_back(op->duration);
+      durations.push_back(kernel->duration);
     }
   }
 
-  float min_duration = max({2 * *min_element(durations.begin(), durations.end()),
-                            accumulate(durations.begin(), durations.end(), 0.0f) / durations.size(),
-                            median(durations)});
+  std::vector<float> tmp = {2 * minimum(durations), mean(durations), median(durations)};
+  float min_duration = maximum(tmp);
 
   if (starts.empty())
   {
@@ -345,34 +348,35 @@ std::vector<double> simulate_interferance(
     throw invalid_argument("Starts size mismatch with models.");
   }
 
-  std::vector<int> kernel_positions = starts;
-  set<int> completed;
+  std::vector<int> per_model_kernel_pos = starts;
+  std::set<int> completed;
   std::vector<std::vector<double>> duration_after_interferences(models.size());
   std::vector<double> new_durations(models.size(), 0.0f);
+  std::vector<Kernel *> kernels;
 
   while (true)
   {
-    vector<Kernel *> kernels;
+    kernels.clear();
     for (size_t i = 0; i < models.size(); ++i)
     {
-      while (prob > 0 && bernoulli(prob) && kernel_positions[i] < models[i]->get_kernels().size())
+      while (prob > 0 && bernoulli(prob) && per_model_kernel_pos[i] < models[i]->get_kernels().size())
       {
-        kernel_positions[i]++;
+        per_model_kernel_pos[i]++;
       }
       Kernel *kernel = nullptr;
-      if (kernel_positions[i] < models[i]->get_kernels().size())
+      if (per_model_kernel_pos[i] < models[i]->get_kernels().size())
       {
-        kernel = models[i]->get_kernels()[kernel_positions[i]];
+        kernel = models[i]->get_kernels()[per_model_kernel_pos[i]];
       }
       kernels.push_back(kernel);
     }
 
-    vector<int> index_running_models;
+    std::vector<int> concurrent_kernel_index;
     for (size_t i = 0; i < kernels.size(); ++i)
     {
       if (kernels[i] != nullptr)
       {
-        index_running_models.push_back(i);
+        concurrent_kernel_index.push_back(i);
       }
     }
 
@@ -381,7 +385,7 @@ std::vector<double> simulate_interferance(
     // No more interference, exit the loop.
     if (kernels.size() == 1)
     {
-      kernel_positions[index_running_models[0]]++;
+      per_model_kernel_pos[concurrent_kernel_index[0]]++;
       continue;
     }
     else if (kernels.empty())
@@ -389,16 +393,15 @@ std::vector<double> simulate_interferance(
       break;
     }
 
-    // Decending order.
     std::vector<int> orders;
     for (const auto &kernel : kernels)
     {
-      orders.push_back(-kernel->order());
+      orders.push_back(-kernel->order()); // Decending order.
     }
     std::vector<size_t> indeces = argsort(orders);
-
-    reorder_vector(kernel_positions, indeces);
-    reorder_vector(index_running_models, indeces);
+    reorder_vector(kernels, indeces);
+    reorder_vector(per_model_kernel_pos, indeces);
+    reorder_vector(concurrent_kernel_index, indeces);
 
     std::vector<std::vector<int>> resources_required_per_block;
     std::vector<int> maximum_blocks;
@@ -433,9 +436,9 @@ std::vector<double> simulate_interferance(
       }
     }
 
-    // Make sure that at least one kernel launches..
-    if (all_of(new_max_blocks.begin(), new_max_blocks.end(), [](int x)
-               { return x == 0; }))
+    // Make sure that at least one kernel launches.
+    if (all_of(new_max_blocks.begin(), new_max_blocks.end(), [](int new_max_blocks)
+               { return new_max_blocks == 0; }))
     {
       new_max_blocks[0] = maximum_blocks[0];
     }
@@ -460,7 +463,7 @@ std::vector<double> simulate_interferance(
       running_kernel_indices.push_back(std::get<1>(occ) > 0);
     }
 
-    vector<float> factors;
+    std::vector<float> factors;
     for (size_t i = 0; i < occupancies.size(); ++i)
     {
       if (running_kernel_indices[i])
@@ -470,22 +473,40 @@ std::vector<double> simulate_interferance(
     }
 
     // Determine the extended new duration during the interference.
-    vector<float> extended_durations;
+    std::vector<float> extended_durations;
     for (size_t i = 0; i < factors.size(); ++i)
     {
       extended_durations.push_back(factors[i] * xxx_durations[i]);
     }
 
+    if (extended_durations.empty())
+    {
+      auto max_blocks = new_max_blocks;
+      for (size_t i = 0; i < new_max_blocks.size(); i++)
+      {
+        std::cout << kernels[i] << std::endl;
+        spdlog::debug("New occupancy:\n\txxx_max_blocks_granted: {}\n\twarps_per_block: {}\n\twarps_per_multiprocessor: {}\n\toccupancy: {}",
+                     kernels[i]->xxx_max_blocks_granted,
+                     kernels[i]->get_perf().warpsPerBlock,
+                     kernels[i]->get_perf().warpsPerMultiprocessor,
+                     (float)kernels[i]->xxx_max_blocks_granted * kernels[i]->get_perf().warpsPerBlock / kernels[i]->get_perf().warpsPerMultiprocessor);
+      }
+      spdlog::error("====== No running kernel: {} | max_blocks: {} | new_max_blocks: {}",
+                    vec2str(running_kernel_indices),
+                    vec2str(maximum_blocks),
+                    vec2str(new_max_blocks));
+    }
+
     int first_kernel_to_finish = argmin(extended_durations);
     float delta = extended_durations[first_kernel_to_finish];
 
-    vector<float> equivalent_work_times;
-    for (float f : factors)
+    std::vector<float> equivalent_work_times;
+    for (float factor : factors)
     {
-      equivalent_work_times.push_back(delta / f);
+      equivalent_work_times.push_back(delta / factor);
     }
 
-    vector<float> additional_times(running_kernel_indices.size(), delta);
+    std::vector<float> additional_times(running_kernel_indices.size(), delta);
     for (size_t i = 0, j = 0; i < running_kernel_indices.size(); ++i)
     {
       if (running_kernel_indices[i])
@@ -496,7 +517,7 @@ std::vector<double> simulate_interferance(
 
     for (size_t i = 0; i < kernels.size(); ++i)
     {
-      int index_model = index_running_models[i];
+      int index_model = concurrent_kernel_index[i];
       kernels[i]->set_order(kernels[i]->order() + 1);
       if (running_kernel_indices[i])
       {
@@ -513,12 +534,12 @@ std::vector<double> simulate_interferance(
 
       if (first_kernel_to_finish == i || (running_kernel_indices[i] && (kernels[i]->xxx_duration < min_duration || one_interference_at_most)))
       {
-        kernel_positions[index_model]++;
+        per_model_kernel_pos[index_model]++;
         if (interfere_all_kernels)
         {
-          kernel_positions[index_model] %= models[index_model]->get_kernels().size();
+          per_model_kernel_pos[index_model] %= models[index_model]->get_kernels().size();
         }
-        if (kernel_positions[index_model] == starts[index_model])
+        if (per_model_kernel_pos[index_model] == starts[index_model])
         {
           completed.insert(index_model);
           duration_after_interferences[index_model].push_back(duration_after_interference(models[index_model]));
@@ -528,7 +549,9 @@ std::vector<double> simulate_interferance(
     }
 
     if (completed.size() == models.size())
+    {
       break;
+    }
   }
 
   for (size_t i = 0; i < duration_after_interferences.size(); ++i)
@@ -554,8 +577,9 @@ private:
 public:
   RoomieScheduler() {}
 
-  std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates) override
+  std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates, bool scaling=false) override
   {
+    spdlog::debug("------------ {} -----------", variant_candidates[0]);
     std::vector<std::tuple<Model *, Worker *, std::vector<float>>> simulations;
 
     for (auto &variant_name : variant_candidates)
@@ -575,7 +599,7 @@ public:
       {
         // 1. Ensure that any variant doesn't have a perf drop beyond a certain threshold.
         auto it = max_element(std::get<2>(item).begin(), std::get<2>(item).end());
-        if (*it <= 0.75)
+        if (*it <= 0.5)
         {
           simulations.push_back(item);
         }
@@ -601,6 +625,23 @@ public:
                 float thr_b = (variant->get_throughput() - variant->get_throughput() * std::get<2>(b)[0]);
                 return thr_a > thr_b;
               });
+    int i = 0;
+    for (const auto &el : simulations)
+    {
+      if (i++ > 5)
+      {
+        break;
+      }
+      std::vector<std::string> names;
+      for (const auto &item : std::get<1>(el)->get_variants())
+      {
+        names.push_back(item->name);
+      }
+      spdlog::debug("Variant({}, thr={}) ---> Worker({}, variants={}) | {}",
+                    std::get<0>(el)->name, std::get<0>(el)->get_throughput() - std::get<0>(el)->get_throughput() * std::get<2>(el)[0],
+                    std::get<1>(el)->get_id(), vec2str(names),
+                    vec2str(std::get<2>(el)));
+    }
 
     auto &best = simulations.front();
 
@@ -644,16 +685,14 @@ public:
     return hardware_platform + "_" + key; // assuming Worker has to_string()
   }
 
-  std::pair<std::vector<double>, std::vector<double>> roomie(std::vector<Model *> &models)
+  std::pair<std::vector<double>, std::vector<double>> roomie(std::vector<Model *> &models, Worker *worker)
   {
     std::vector<double> durations;
     for (const auto model : models)
     {
       durations.push_back(model->initial_duration());
     }
-    NvidiaGpuSpec gpu_spec(models[0]->get_kernels()[0]->capability_major, models[0]->get_kernels()[0]->capability_minor);
-    auto boundaries = gpu_spec.boundaries();
-    auto new_durations = simulate_interferance(models, boundaries);
+    auto new_durations = simulate_interferance(models, worker->get_gpu_spec()->boundaries());
 
     return {durations, new_durations};
   }
@@ -666,7 +705,16 @@ public:
     {
       variant = new Model(*this->load_model_metadata(worker->get_hardware_platform(), variant_name));
       variant->batch_size = batch_size;
-
+      for (size_t i = 0; i < variant->get_kernels().size(); i++)
+      {
+        /* we copy to make sure that two instances don't reference the same kernels vector. */
+        variant->get_kernels()[i] = new Kernel(*variant->get_kernels()[i]);
+      }
+      for (auto &kernel : variant->get_kernels())
+      {
+        auto perf = worker->get_gpu_spec()->theoretical_occupancy(kernel->thread_block(), kernel->register_per_thread, kernel->shared_memory);
+        kernel->set_perf(perf);
+      }
       if (worker->percent_occupation(variant->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY || variant->get_throughput() == 0)
       {
         continue;
@@ -691,8 +739,7 @@ public:
           results.push_back({variant, perf_drops});
           continue;
         }
-
-        auto [durations, new_durations] = roomie(models);
+        auto [durations, new_durations] = roomie(models, worker);
 
         if (new_durations < durations)
         {
@@ -701,18 +748,7 @@ public:
           {
             oss += "(" + model->name + ", " + std::to_string(model->batch_size) + ") ";
           }
-
-          oss += "\n\tDurations=[";
-          for (size_t i = 0; i < durations.size(); i++)
-          {
-            oss += std::to_string(durations[i]) + ", ";
-          }
-          oss += "]\n\tNew durations=";
-          for (size_t i = 0; i < new_durations.size(); i++)
-          {
-            oss += std::to_string(new_durations[i]) + ", ";
-          }
-          oss += "]";
+          oss += "\n\tDurations: " + vec2str(durations) + "\n\tNew durations: " + vec2str(new_durations);
           throw std::runtime_error(oss);
         }
 

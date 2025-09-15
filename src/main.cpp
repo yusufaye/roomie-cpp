@@ -24,7 +24,7 @@ std::atomic<bool> terminateFlag(false);
 
 void signalHandler(int sig)
 {
-  std::cout << "\nSignal received: " << sig << "\n";
+  spdlog::debug("Signal handler received: {}", sig);
   terminateFlag.store(true);
 }
 
@@ -60,8 +60,7 @@ int main(int argc, char const *argv[])
     }
     std::string type = config["type"];
 
-    spdlog::info("[{}] About to load configuration from '{}'", type, path);
-    // std::cout << "⚠️[" + type + "] About to load configuration from " + "'" + path + "'" << std::endl;
+    spdlog::debug("[{}] About to load configuration from '{}'", type, path);
     Engine *engine;
     if (type == "PoissonZipfQueryGenerator")
     {
@@ -84,13 +83,16 @@ int main(int argc, char const *argv[])
     }
     engine->configure(config);
     std::thread start_thread([&engine]()
-                             { engine->start(); });
+                             {
+                              engine->start();
+                            terminateFlag.store(true);
+                           });
 
     while (!terminateFlag.load())
     {
       std::this_thread::sleep_for(std::chrono::seconds(1));
     }
-    spdlog::warn("👋Will shutdown");
+    spdlog::debug("👋Will shutdown");
     engine->shutdown();
     exit(0);
   }

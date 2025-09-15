@@ -1,15 +1,14 @@
 #ifndef KERNELS_H
 #define KERNELS_H
 
-#include <iostream>
 #include <map>
 #include <string>
+#include <iostream>
 #include "occupancy.h"
 
 class Kernel
 {
 public:
-  Kernel() {}
   std::string kernel_name;
   // Grid dims
   int grid_dim_x;
@@ -41,19 +40,49 @@ public:
   float capability_minor;
   float capability_major;
 
+  Kernel() {}
+
+  Kernel(const Kernel &kernel)
+  {
+    kernel_name = kernel.kernel_name;
+    grid_dim_x = kernel.grid_dim_x;
+    grid_dim_y = kernel.grid_dim_y;
+    grid_dim_z = kernel.grid_dim_z;
+    block_dim_x = kernel.block_dim_x;
+    block_dim_y = kernel.block_dim_y;
+    block_dim_z = kernel.block_dim_z;
+    register_per_thread = kernel.register_per_thread;
+    duration = kernel.duration;
+    static_shared_memory_per_block = kernel.static_shared_memory_per_block;
+    dynamic_shared_memory_per_block = kernel.dynamic_shared_memory_per_block;
+    threads = kernel.threads;
+    waves_per_sm = kernel.waves_per_sm;
+    shared_memory = kernel.shared_memory;
+    theoretical_occupancy = kernel.theoretical_occupancy;
+    theoretical_active_warps_per_SM = kernel.theoretical_active_warps_per_SM;
+    achieved_occupancy = kernel.achieved_occupancy;
+    achieved_active_warps_per_SM = kernel.achieved_active_warps_per_SM;
+    block_limit_registers = kernel.block_limit_registers;
+    block_limit_shared_mem = kernel.block_limit_shared_mem;
+    block_limit_warps = kernel.block_limit_warps;
+    block_limit_sm = kernel.block_limit_sm;
+    capability_minor = kernel.capability_minor;
+    capability_major = kernel.capability_major;
+    perf_ = kernel.perf_;
+  }
+
   float thread_block()
   {
     return block_dim_x * block_dim_y * block_dim_z;
   }
 
-
   /* SPECIFIC TO ROOMIE */
 
-  int xxx_order;
-  int xxx_max_blocks_granted;
-  int xxx_duration;
-  int xxx_extended_duration;
-  int xxx_additional_duration;
+  int xxx_order = 0;
+  int xxx_max_blocks_granted = 0;
+  float xxx_duration = 0.0;
+  float xxx_extended_duration = 0.0;
+  float xxx_additional_duration = 0.0;
 
   Perf get_perf()
   {
@@ -65,9 +94,9 @@ public:
     perf_ = perf;
   }
 
-  float new_occupancy()
+  float new_occupancy() const
   {
-    return (xxx_max_blocks_granted * perf_.warpsPerBlock) / perf_.warpsPerMultiprocessor * 100;
+    return ((float)xxx_max_blocks_granted * perf_.warpsPerBlock) / perf_.warpsPerMultiprocessor * 100;
   }
 
   int order()
@@ -98,9 +127,9 @@ public:
   std::vector<int> resource_required_per_block()
   {
     return {
-      perf_.resource_required_per_block["warps_per_block"],
-      perf_.resource_required_per_block["regs_per_block"],
-      perf_.resource_required_per_block["shared_memory_per_block"],
+        perf_.resource_required_per_block["warps_per_block"],
+        perf_.resource_required_per_block["regs_per_block"],
+        perf_.resource_required_per_block["shared_memory_per_block"],
     };
   }
 
@@ -109,6 +138,11 @@ public:
    */
   float duration_after_interference()
   {
+    if (xxx_additional_duration < 0)
+    {
+      spdlog::error("[Kernel] duration must be positive but {}", xxx_additional_duration);
+      throw invalid_argument("Kernel interference error.");
+    }
     return duration + xxx_additional_duration;
   }
 

@@ -1,12 +1,13 @@
 import os
-# os.environ["NUMEXPR_MAX_THREADS"] = "8"
+os.environ['NUMEXPR_MAX_THREADS'] = '8'
 
 import sys
 import json
+import asyncio
 import logging
 import argparse
 
-from manager.worker import WorkerEngine
+from manager.worker_async import WorkerEngine
 
 logging.basicConfig(
   format="%(asctime)s %(levelname)s: %(message)s",
@@ -50,7 +51,11 @@ def main():
   engine = WorkerEngine()
   engine.configure(config=config)
   
-  engine.run() # For Python 3.8.10
+  asyncio.get_event_loop().run_until_complete(engine.run()) # For Python 3.8.10
+  # asyncio.run(engine.run())
   
 if __name__== "__main__":
-  main()
+  try:
+    main()
+  except asyncio.exceptions.CancelledError:
+    pass

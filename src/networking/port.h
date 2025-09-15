@@ -26,7 +26,11 @@ public:
     {
       spdlog::debug("[InPort] Host: {}, Port: {}", host_, port_);
       // Set logging settings
-      server_.get_alog().set_channels(websocketpp::log::alevel::none);
+      // server_.get_alog().set_channels(websocketpp::log::alevel::none);
+
+      // Disable all access logging
+      server_.clear_access_channels(websocketpp::log::alevel::all);
+      server_.clear_error_channels(websocketpp::log::elevel::all);
 
       // Initialize Asio
       server_.init_asio();
@@ -37,7 +41,9 @@ public:
       server_.set_fail_handler([this](websocketpp::connection_hdl)
                                {
             connected_ = false;
-            spdlog::error("⛔️[InPort] Connection failed to host {} and port {}" ,host_ ,port_); });
+            spdlog::debug("⛔️[InPort] Connection failed to host {} and port {}" ,host_ ,port_);
+            schedule_retry();
+          });
 
       server_.set_message_handler([this](websocketpp::connection_hdl hdl, server::message_ptr msg)
                                   { message_queue_.push(msg->get_payload()); });
@@ -48,11 +54,7 @@ public:
                                 connected_ = true;
                                 spdlog::debug("✅[InPort] Client connected to ws://{}:{}.", host_, port_); });
 
-      boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address_v4::from_string("0.0.0.0"), port_);
-      server_.listen(endpoint);
-
-      // Start the server accept loop
-      server_.start_accept();
+      connect();
 
       server_thread_ = std::thread([this]()
                                    { server_.run(); });
@@ -61,7 +63,7 @@ public:
     }
     catch (const std::exception &e)
     {
-      spdlog::error("⛔️[InPort] Error while trying to set input connection at host: {}, and port: {}", host_, port_, e.what());
+      spdlog::debug("⛔️[InPort] Error while trying to set input connection at host: {}, and port: {}", host_, port_, e.what());
     }
   }
 
@@ -82,7 +84,7 @@ public:
     {
       server_thread_.join();
     }
-    spdlog::warn("👋[InPort] About to close ws://{}:{}.", host_, port_);
+    spdlog::debug("👋[InPort] About to close ws://{}:{}.", host_, port_);
   }
 
   std::string to_string() const
@@ -102,8 +104,6 @@ private:
     while (true)
     {
       message = message_queue_.pop();
-      // spdlog::debug("✉️ {}", message);
-
       if (message.empty())
       {
         break;
@@ -114,6 +114,27 @@ private:
     }
   }
 
+  void connect()
+  {
+    boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address_v4::from_string("0.0.0.0"), port_);
+    server_.listen(endpoint);
+    // Start the server accept loop
+    server_.start_accept();
+  }
+
+  void schedule_retry()
+  {
+    if (retry_count_ >= max_retries_)
+    {
+      spdlog::debug("⛔️ [InPort] Max retries reached. Giving up.");
+      return;
+    }
+    retry_count_++;
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+
+    connect();
+  }
+
   server server_;
   std::string host_;
   int port_;
@@ -122,6 +143,8 @@ private:
   BlockingQueue<std::string> message_queue_;
   std::thread server_thread_;
   std::thread consumer_thread_;
+  int retry_count_;
+  const int max_retries_ = 20;
 };
 
 class OutPort
@@ -134,7 +157,11 @@ public:
     spdlog::debug("[OutPort] Host: {}, Port: {}", remote_host, remote_port);
 
     // Set logging to be pretty verbose (everything except message payloads)
-    client_.get_alog().set_channels(websocketpp::log::alevel::none);
+    // client_.get_alog().set_channels(websocketpp::log::alevel::none);
+
+    // Disable all access logging
+    client_.clear_access_channels(websocketpp::log::alevel::all);
+    client_.clear_error_channels(websocketpp::log::elevel::all);
 
     // ex. "ws://localhost:9002"
     uri_ = "ws://" + remote_host + ":" + std::to_string(remote_port);
@@ -159,7 +186,7 @@ public:
     client_.set_fail_handler([this](websocketpp::connection_hdl)
                              {
             connected_ = false;
-            spdlog::error("⛔️[OutPort] Connection failed to host {} and port {}\n\tRetrying in 3 seconds...", remote_host_ ,remote_port_);
+            spdlog::debug("⛔️[OutPort] Connection failed to host {} and port {}\n\tRetrying in 3 seconds...", remote_host_ ,remote_port_);
             schedule_retry(); });
 
     connect();
@@ -174,7 +201,7 @@ public:
   {
     close();
   }
-  
+
   void close()
   {
     Message message("FINISHED");
@@ -188,16 +215,16 @@ public:
     {
       client_thread_.join();
     }
-    spdlog::warn("👋[OutPort] About to close ws://{}:{}.", remote_host_, remote_port_);
+    spdlog::debug("👋[OutPort] About to close ws://{}:{}.", remote_host_, remote_port_);
   }
-  
+
   void connect()
   {
     websocketpp::lib::error_code ec;
     client::connection_ptr con = client_.get_connection(uri_, ec);
     if (ec)
     {
-      spdlog::error("Could not create connection: {}", ec.message());
+      spdlog::debug("Could not create connection: {}", ec.message());
       return;
     }
     client_.connect(con);
@@ -207,13 +234,18 @@ public:
   {
     if (retry_count_ >= max_retries_)
     {
-      spdlog::error("⛔️ Max retries reached. Giving up.");
+      spdlog::debug("⛔️[OutPort] Max retries reached. Giving up.");
       return;
     }
     retry_count_++;
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
     connect();
+  }
+
+  int size() const
+  {
+    return message_queue_.size();
   }
 
   void push(const Message &msg)
@@ -236,7 +268,8 @@ public:
 
   std::string to_string() const
   {
-    return "OutPort('remote host': " + remote_host_ +
+    return "OutPort('id': " + std::to_string(id_) +
+           ", 'remote host': " + remote_host_ +
            ", 'remote port': " + std::to_string(remote_port_) +
            ", 'qsize': " + std::to_string(message_queue_.size()) + ")";
   }
@@ -256,14 +289,14 @@ private:
         client_.send(hdl_, message.serialize(), websocketpp::frame::opcode::text);
         if (message.get_type() == "FINISHED")
         {
-          cout << "--- Will close connection---" << endl;
+          spdlog::debug("--- Will close connection---");
           break;
         }
       }
     }
     catch (const std::exception &e)
     {
-      spdlog::error("⛔️ Connection lost to {}\n\t{}", uri_, e.what());
+      spdlog::debug("⛔️ Connection lost to {}\n\t{}", uri_, e.what());
     }
   }
 

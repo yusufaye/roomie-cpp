@@ -1,5 +1,5 @@
-#ifndef ROOMIE_V3_SCHEDULER_H
-#define ROOMIE_V3_SCHEDULER_H
+#ifndef ROOMIE_V2_SCHEDULER_H
+#define ROOMIE_V2_SCHEDULER_H
 
 #include <math.h>
 #include <random>
@@ -8,19 +8,16 @@
 #include "utils/datastore.h"
 #include "roomie_v1_scheduler.h"
 
-
-
-class RoomieV3Scheduler : public RoomieV1Scheduler
+class RoomieV2Scheduler : public RoomieV1Scheduler
 {
 public:
-  RoomieV3Scheduler() {}
+  RoomieV2Scheduler() {}
 
-  std::pair<std::vector<double>, std::vector<double>> heuristic_roomie(std::vector<Model *> &models)
+  std::pair<std::vector<double>, std::vector<double>> heuristic_roomie(std::vector<Model *> &models, float prob = 0.5)
   {
     std::vector<double> durations, new_durations;
     std::vector<int> lengths;
     std::vector<std::vector<std::vector<double>>> masks;
-    std::vector<std::vector<float>> occupancies;
 
     int N = models.size();
 
@@ -42,17 +39,8 @@ public:
       for (auto &kernel : models[i]->get_kernels())
       {
         kernel_durations.push_back(kernel->duration);
-        if (kernel->achieved_occupancy > 1)
-        {
-          occ.push_back(kernel->achieved_occupancy / 100);
-        }
-        else
-        {
-          occ.push_back(kernel->achieved_occupancy);
-        }
       }
       masks.push_back(create_mask(kernel_durations));
-      occupancies.push_back(occ);
     }
 
     for (int i = 0; i < N; ++i)
@@ -77,11 +65,7 @@ public:
             {
               break;
             }
-            if (occupancies[i][k] == 0 || occupancies[i][k]+occupancies[j][k] <= 0.5)
-            {
-              continue;
-            }
-            if (bernoulli(occupancies[j][k]))
+            if (bernoulli(prob))
             {
               delayed += sample_dur[k];
             }
@@ -98,4 +82,4 @@ public:
   }
 };
 
-#endif // ROOMIE_V3_SCHEDULER_H
+#endif // ROOMIE_V2_SCHEDULER_H

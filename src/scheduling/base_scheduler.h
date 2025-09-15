@@ -12,7 +12,7 @@ protected:
 
 public:
   Scheduler() {}
-  virtual std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates) = 0;
+  virtual std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates, bool scaling=false) = 0;
 
   Model *load_model_metadata(string hardware_platform, string variant_name)
   {

@@ -30,12 +30,10 @@ public:
   {
     config_ = config;
     id_ = config_["id"].get<int>();
-    // std::cout << "[" << engine_name_ << "] Loaded configuration: " << config_ << std::endl;
     if (config_["parameters"].contains("log_dir"))
     {
       log_directory_ = config_["parameters"]["log_dir"];
     }
-
     if (config_.contains("host") && config_.contains("port") && config_["port"].get<int>() > 0)
     {
       auto in = new InPort(config_["host"], config_["port"],
@@ -45,9 +43,10 @@ public:
     }
     for (auto &remote : config_["remote_engines"])
     {
-      int worker_id = generator_.next();
-      remote["id"] = worker_id;
-      auto out = new OutPort(worker_id, remote["remote_host"], remote["remote_port"]);
+      // int worker_id = generator_.next();
+      // remote["id"] = worker_id;
+      // auto out = new OutPort(worker_id, remote["remote_host"], remote["remote_port"]);
+      auto out = new OutPort(remote["id"], remote["remote_host"], remote["remote_port"]);
       outgoing_.push_back(out);
     }
   }
@@ -87,7 +86,7 @@ public:
       throw e;
     }
 
-    spdlog::warn("🤠 [ENGINE] {} terminated!", engine_name_);
+    spdlog::debug("🤠 [ENGINE] {} terminated!", engine_name_);
   }
 
   std::vector<OutPort *> get_outgoing()

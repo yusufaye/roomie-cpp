@@ -1,16 +1,15 @@
 #ifndef CONSTANT_H
 #define CONSTANT_H
 
-#include <array>
 #include <vector>
+#include <array>
 #include <string>
 
-const int MAXIMUM_CONCURRENCY_LEVEL = 4;
+const int MAX_GPU_MEMORY_OCCUPANCY = 90;
 
-const int MAX_GPU_MEMORY_OCCUPANCY = 80;
-
-const std::vector<int> BATCH_SIZES = { 16 };
+const std::vector<int> BATCH_SIZES = { 32, 64, 128 };
 
 const std::string WORKDIR = "/usmb/roomie/";
+
 
 #endif  // CONSTANT_H

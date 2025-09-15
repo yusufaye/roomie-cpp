@@ -5,6 +5,7 @@
 #include <set>
 #include <mutex>
 #include "kernels.h"
+#include "general.h"
 
 using namespace std;
 
@@ -25,9 +26,9 @@ class Model
 {
 private:
   float achieved_throughput_ = 0.0;
-  map<int, float> throughput_;
-  map<int, unsigned long> memory_;
-  map<int, std::vector<Kernel *>> kernels_;
+  std::map<int, float> throughput_;
+  std::map<int, unsigned long> memory_;
+  std::map<int, std::vector<Kernel *>> kernels_;
 
 public:
   int id;
@@ -101,12 +102,12 @@ public:
     return total / input_rates.size();
   }
 
-  float initial_duration() const
+  double initial_duration() const
   {
-    float value = 0.0;
-    for (const Kernel *it : get_kernels())
+    double value = 0.0;
+    for (const auto &kernel : get_kernels())
     {
-      value += it->duration;
+      value += kernel->duration;
     }
     return value;
   }
@@ -120,9 +121,14 @@ public:
     return get_throughput();
   }
 
-  void set_achieved_throughput(float achieved_throughput_)
+  float get_runtime_throughput() const
   {
-    achieved_throughput_ = achieved_throughput_;
+    return achieved_throughput_;
+  }
+
+  void set_achieved_throughput(float value)
+  {
+    achieved_throughput_ = value;
   }
 
   void set_kernels(std::vector<Kernel *> kernels, int bs = 0)
@@ -218,17 +224,17 @@ public:
     return get_achieved_throughput() * input_rates.size();
   }
 
-  void update(Model obj)
-  {
-    name = obj.name;
-    qsize = obj.qsize;
-    accuracy = obj.accuracy;
-    occupancy = obj.occupancy;
-    achieved_throughput_ = obj.achieved_throughput_;
-    batch_size = obj.batch_size;
-    input_rates = obj.input_rates;
-    hardware_platform = obj.hardware_platform;
-  }
+  // void update(Model obj)
+  // {
+  //   name = obj.name;
+  //   qsize = obj.qsize;
+  //   accuracy = obj.accuracy;
+  //   occupancy = obj.occupancy;
+  //   achieved_throughput_ = obj.achieved_throughput_;
+  //   batch_size = obj.batch_size;
+  //   input_rates = obj.input_rates;
+  //   hardware_platform = obj.hardware_platform;
+  // }
 
   bool operator==(const Model &c)
   {
@@ -252,6 +258,16 @@ public:
   Worker(int id, int device = 0, string hardware_platform = "xavier")
       : id_(id), device_(device), hardware_platform_(hardware_platform), total_memory_(0.0) {}
 
+  NvidiaGpuSpec *get_gpu_spec() const
+  {
+    return gpu_spec_;
+  }
+
+  void set_gpu_spec(int major, int minor)
+  {
+    gpu_spec_ = new NvidiaGpuSpec(major, minor);
+  }
+
   float get_free_memory() const
   {
     float total_variant_memory = 0.0f;
@@ -272,17 +288,17 @@ public:
     return (mem_used / total_memory_) * 100.0f;
   }
 
-  void update_variant(Model &variant)
-  {
-    for (auto &running_variant : variants_)
-    {
-      if (*running_variant == variant)
-      {
-        running_variant->update(variant);
-        return;
-      }
-    }
-  }
+  // void update_variant(Model &variant)
+  // {
+  //   for (auto &running_variant : variants_)
+  //   {
+  //     if (*running_variant == variant)
+  //     {
+  //       running_variant->update(variant);
+  //       return;
+  //     }
+  //   }
+  // }
 
   bool operator==(const Worker &other) const
   {
@@ -369,6 +385,7 @@ private:
   double total_memory_;
   string device_name_;
   State state_;
+  NvidiaGpuSpec *gpu_spec_;
   std::vector<Model *> variants_;
 };
 
@@ -483,26 +500,6 @@ public:
     }
   }
 
-  void update(Worker *worker)
-  {
-    auto it = find(workers_.begin(), workers_.end(), worker);
-    if (it != workers_.end())
-    {
-      int idx = distance(workers_.begin(), it);
-      for (auto &variant : worker->get_variants())
-      {
-        if (variant == nullptr)
-          continue;
-        workers_[idx]->set_total_memory(worker->get_total_memory());
-        workers_[idx]->update_variant(*variant);
-      }
-    }
-    else
-    {
-      throw invalid_argument("Worker not found");
-    }
-  }
-
   std::vector<std::pair<Model *, Worker *>> get_variant_workers()
   {
     static std::vector<std::pair<Model *, Worker *>> variant_workers;
@@ -532,15 +529,6 @@ public:
     return variant_workers;
   }
 
-  // void set_state(State state)
-  // {
-  //   std::lock_guard<std::mutex> lock(mutex_);
-  //   for (auto worker : workers_)
-  //   {
-  //     worker->set_state(state);
-  //   }
-  // }
-
   Worker *get_worker(int id)
   {
     for (auto &worker : get_workers())
@@ -561,6 +549,26 @@ public:
   //   }
   //   return os;
   // }
+
+  std::string to_string() const
+  {
+    std::string summary = "";
+    int ith = 1;
+    for (const auto worker : workers_)
+    {
+      std::vector<std::string> names;
+      for (const auto &variant : worker->get_variants())
+      {
+        names.push_back(variant->name);
+      }
+      if (ith != 1)
+      {
+        summary += " | ";
+      }
+      summary += std::to_string(ith++) + "w->" + vec2str(names);
+    }
+    return summary;
+  }
 };
 
 #endif // DATASTORE_H

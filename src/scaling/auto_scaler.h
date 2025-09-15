@@ -2,6 +2,7 @@
 #define AUTO_SCALER_H
 
 #include <map>
+#include <sstream>
 #include "utils/general.h"
 #include "utils/datastore.h"
 #include "networking/message.h"
@@ -17,6 +18,7 @@ private:
   std::function<void(const std::string &app_id, Model &variant, Worker &worker)> on_stop_;
 
   int interval = 2; // seconds
+  int warming = 5;
   // double threshold = 1.0;
   double threshold = 1.5;
   std::map<string, int> locker_;
@@ -33,13 +35,17 @@ public:
   void run()
   {
     event_.wait();
-    spdlog::info("😎 [auto-scaler] About to start the auto-scaling.");
-
+    for (auto &[app_id, _] : datastore_->get_registration())
+    {
+      locker_[app_id] = warming;
+    }
+    spdlog::debug("😎 [auto-scaler] About to start the auto-scaling.");
     // Start monitoring loop
     while (true)
     {
       std::this_thread::sleep_for(std::chrono::seconds(interval));
       std::vector<std::pair<std::string, float>> overloaded;
+      std::map<std::string, std::tuple<int, float, int>> repport;
       for (const auto &[app_id, names] : datastore_->get_registration())
       {
         if (locker_.find(app_id) != locker_.end() && locker_[app_id] > 0)
@@ -64,23 +70,30 @@ public:
         if (running_variants.empty())
           continue;
 
-        double throughput = 0.0;
-        double workload = 0.0;
+        float throughput = 0.0;
+        float workload = 0.0;
+        float thr = 0.0;
+        int qsize = 0;
         for (Model *variant : running_variants)
         {
           throughput += variant->compute_throughput();
           workload += variant->compute_workload();
+          thr += variant->get_runtime_throughput();
+          qsize += variant->qsize;
         }
+        repport[app_id] = {running_variants.size(), thr, qsize};
         overloaded.push_back({app_id, workload / throughput});
       }
       std::sort(overloaded.begin(), overloaded.end(), [](const std::pair<std::string, float> &a, const std::pair<std::string, float> &b)
                 { return a.second < b.second; });
-      std::string summary = "";
+      std::ostringstream oss;
       for (const auto [app_id, ratio] : overloaded)
       {
-        summary += "\n\t| " + app_id + ": Ratio=" + std::to_string(ratio);
+        const auto [count, thr, qsize] = repport[app_id];
+        oss << "\n\t" << count << "x " << app_id << "\tratio: " << ratio << "\tthr: " << thr << "\tqsize: " << qsize;
       }
-      spdlog::debug("🔵 [auto-scaler] Summary: {}", summary);
+
+      spdlog::debug("🔵 [auto-scaler] SUMMARYSUMMARYSUMMARYSUMMARY{}", oss.str());
 
       for (size_t i = 0; i < overloaded.size(); i++)
       {
@@ -102,18 +115,17 @@ public:
     {
       return false;
     }
-    std::vector<Worker *> _workers;
+    std::vector<Worker *> subset_workers;
     for (const auto worker : datastore_->get_workers())
     {
-      // if (worker->get_state() == State::SET)
-      // {
-      //   _workers.push_back(worker);
-      // }
-      _workers.push_back(worker);
+      if (worker->get_total_running_variants() < MAXIMUM_CONCURRENCY_LEVEL)
+      {
+        subset_workers.push_back(worker);
+      }
     }
-    if (_workers.empty())
+    if (subset_workers.empty())
     {
-      spdlog::warn("⚠️ [auto-scaler] All workers are deploying.");
+      spdlog::debug("⚠️ [auto-scaler] All workers are deploying.");
       return false;
     }
     std::vector<std::string> names;
@@ -121,7 +133,7 @@ public:
     {
       names.push_back(name);
     }
-    auto [variant, worker] = scheduler_->schedule(_workers, names);
+    auto [variant, worker] = scheduler_->schedule(subset_workers, names, true);
     if (variant != nullptr)
     {
       if (worker->percent_occupation(variant->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY)
@@ -129,7 +141,7 @@ public:
         throw std::runtime_error("⛔️[auto-scaler] Not enough memory left for " + variant->to_string() + " at " + worker->to_string() + "\n\t| New occupancy: " + std::to_string(worker->percent_occupation(variant->get_memory())) + " (%)");
       }
       on_deploy_(app_id, *variant, *worker);
-      locker_[app_id] = 5;
+      locker_[app_id] = warming;
       spdlog::debug("⬆️[auto-scaler] About to perform upscaling:\n\t| {}\n\t| to {}", variant->to_string(), worker->to_string());
       return true;
     }

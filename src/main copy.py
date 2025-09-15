@@ -1,8 +1,9 @@
 import os
-# os.environ["NUMEXPR_MAX_THREADS"] = "8"
+os.environ['NUMEXPR_MAX_THREADS'] = '8'
 
 import sys
 import json
+import asyncio
 import logging
 import argparse
 
@@ -50,7 +51,11 @@ def main():
   engine = WorkerEngine()
   engine.configure(config=config)
   
-  engine.run() # For Python 3.8.10
+  asyncio.get_event_loop().run_until_complete(engine.start()) # For Python 3.8.10
+  # asyncio.run(engine.start())
   
 if __name__== "__main__":
-  main()
+  try:
+    main()
+  except asyncio.exceptions.CancelledError:
+    pass

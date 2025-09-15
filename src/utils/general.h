@@ -48,17 +48,28 @@ size_t argmin(const std::vector<T> &vec)
 {
   if (vec.empty())
   {
-    throw std::out_of_range("Vector is empty");
+    throw std::out_of_range("[Argmin] Vector is empty");
   }
 
   return std::distance(vec.begin(), std::min_element(vec.begin(), vec.end()));
 }
 
+template <typename T>
+size_t argmax(const std::vector<T> &vec)
+{
+  if (vec.empty())
+  {
+    throw std::out_of_range("[Argmax] Vector is empty");
+  }
+
+  return std::distance(vec.begin(), std::max_element(vec.begin(), vec.end()));
+}
+
 bool bernoulli(float prob)
 {
-  // Create a random number generator
-  static std::random_device rd;
-  static std::mt19937 gen(rd());
+  // static std::random_device rd;
+  // static std::mt19937 gen(rd());
+  static std::mt19937 gen(987654);
   std::uniform_real_distribution<double> uniformDis(0.0, 1.0);
   double randomNumber = uniformDis(gen);
   if (randomNumber < prob)
@@ -68,9 +79,70 @@ bool bernoulli(float prob)
   return false;
 }
 
-float median(const std::vector<float> &vec)
+std::vector<std::vector<double>> create_mask(const std::vector<double> &vec)
 {
-  std::vector<float> sortedVec = vec;
+  int L = vec.size();
+  int M = std::min((int)(L / 2.0), 20);
+  M = (M % 2 == 0) ? M + 1 : M;
+  std::vector<std::vector<double>> mask(M, std::vector<double>(L, 1.0));
+  int max_pad = M / 2;
+  for (int pad = 1; pad <= max_pad; ++pad)
+  {
+    for (int j = 0; j < pad; ++j)
+    {
+      mask[pad - 1][j] = 0.0;
+    }
+    for (int j = L - pad; j < L; ++j)
+    {
+      mask[M - pad][j] = 0.0;
+    }
+  }
+  std::vector<std::vector<double>> result(M, std::vector<double>(L, 0.0));
+  for (int i = 0; i < M; ++i)
+  {
+    for (int j = 0; j < L; ++j)
+    {
+      result[i][j] = vec[j] * mask[i][j];
+    }
+  }
+
+  // e.g., of mask an array {1, 2, 3, 4, 5, 6, 7, 8}
+  // [0 2 3 4 5 6 7 8 ]
+  // |0 0 3 4 5 6 7 8 |
+  // |1 2 3 4 5 6 7 8 |
+  // |1 2 3 4 5 6 0 0 |
+  // [1 2 3 4 5 6 7 0 ]
+  return result;
+}
+
+std::vector<std::vector<bool>> create_bool_mask(int L, int M)
+{
+  M = std::min(M, 20);
+  M = (M % 2 == 0) ? M + 1 : M;
+  std::vector<std::vector<bool>> mask(M, std::vector<bool>(L, true));
+  int max_pad = M / 2;
+  for (int pad = 1; pad <= max_pad; ++pad)
+  {
+    for (int j = 0; j < pad; ++j)
+    {
+      mask[pad - 1][j] = false;
+    }
+    for (int j = L - pad; j < L; ++j)
+    {
+      mask[M - pad][j] = false;
+    }
+  }
+  return mask;
+}
+
+template <typename T>
+T median(const std::vector<T> &vec)
+{
+  if (vec.empty())
+  {
+    throw std::out_of_range("[Median] Vector is empty");
+  }
+  std::vector<T> sortedVec = vec;
   std::sort(sortedVec.begin(), sortedVec.end());
   size_t n = sortedVec.size();
   if (n % 2 == 0)
@@ -83,75 +155,89 @@ float median(const std::vector<float> &vec)
   }
 }
 
-double median(const std::vector<double> &vec)
+template <typename T>
+T mean(const std::vector<T> &vec)
 {
-  std::vector<double> sortedVec = vec;
-  std::sort(sortedVec.begin(), sortedVec.end());
-  size_t n = sortedVec.size();
-  if (n % 2 == 0)
+  if (vec.empty())
   {
-    return (sortedVec[n / 2 - 1] + sortedVec[n / 2]) / 2;
+    throw std::out_of_range("[Mean] Vector is empty");
   }
-  else
-  {
-    return sortedVec[n / 2];
-  }
-}
-
-float mean(const std::vector<float> &arr)
-{
-  float total = 0.0;
-  for (const float item : arr)
+  T total = 0.0;
+  for (const T item : vec)
   {
     total += item;
   }
-  return total / arr.size();
+  return total / vec.size();
 }
 
-float mean(const std::vector<double> &arr)
+template <typename T>
+T minimum(const std::vector<T> &vec)
 {
-  double total = 0.0;
-  for (const double item : arr)
+  if (vec.empty())
   {
-    total += item;
+    throw std::out_of_range("[Minimum] Vector is empty");
   }
-  return total / arr.size();
+  T min_v = vec[0];
+  for (size_t i = 1; i < vec.size(); i++)
+  {
+    if (vec[i] < min_v)
+    {
+      min_v = vec[i];
+    }
+  }
+
+  return min_v;
 }
 
-std::string vec2str(const std::vector<double> &arr)
+template <typename T>
+T maximum(const std::vector<T> &vec)
 {
+  if (vec.empty())
+  {
+    throw std::out_of_range("[Maximum] Vector is empty");
+  }
+  T max_v = vec[0];
+  for (size_t i = 1; i < vec.size(); i++)
+  {
+    if (vec[i] > max_v)
+    {
+      max_v = vec[i];
+    }
+  }
+
+  return max_v;
+}
+
+template <typename T>
+std::string vec2str(const std::vector<T> &vec)
+{
+  if (vec.empty())
+  {
+    return "[]";
+  }
   std::string out = "[ ";
-  for (size_t i = 0; i < arr.size(); i++)
+  for (size_t i = 0; i < vec.size(); i++)
   {
     if (i > 0)
       out += ", ";
-    out += std::to_string(arr[i]);
+    out += std::to_string(vec[i]);
   }
   out += " ]";
   return out;
 }
 
-std::string vec2str(const std::vector<float> &arr)
+std::string vec2str(const std::vector<std::string> &vec)
 {
-  std::string out = "[ ";
-  for (size_t i = 0; i < arr.size(); i++)
+  if (vec.empty())
   {
-    if (i > 0)
-      out += ", ";
-    out += std::to_string(arr[i]);
+    return "[]";
   }
-  out += " ]";
-  return out;
-}
-
-std::string vec2str(const std::vector<std::string> &arr)
-{
   std::string out = "[ ";
-  for (size_t i = 0; i < arr.size(); i++)
+  for (size_t i = 0; i < vec.size(); i++)
   {
     if (i > 0)
       out += ", ";
-    out += arr[i];
+    out += vec[i];
   }
   out += " ]";
   return out;

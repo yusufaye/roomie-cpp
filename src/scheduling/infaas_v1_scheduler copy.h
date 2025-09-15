@@ -11,7 +11,7 @@ class INFaaSV1Scheduler : public Scheduler
 public:
   INFaaSV1Scheduler() {}
 
-  std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates, bool scaling = false) override
+  std::pair<Model *, Worker *> schedule(std::vector<Worker *> &workers, std::vector<std::string> &variant_candidates) override
   {
     return get_variant(workers, variant_candidates);
   }
@@ -52,31 +52,6 @@ public:
       }
     }
 
-    if (current_workers.empty())
-    {
-      for (const auto &variant_name : variant_candidates)
-      {
-        std::sort(workers.begin(), workers.end(),
-                  [](const Worker *a, const Worker *b)
-                  {
-                    return a->get_free_memory() > b->get_free_memory();
-                  });
-        auto least_loaded = workers.front();
-        Model *variant = this->load_model_metadata(least_loaded->get_hardware_platform(), variant_name);
-        for (int batch_size : BATCH_SIZES)
-        {
-          Model *new_variant = new Model(*variant);
-          new_variant->batch_size = batch_size;
-          if (least_loaded->percent_occupation(new_variant->get_memory()) > MAX_GPU_MEMORY_OCCUPANCY)
-          {
-            continue;
-          }
-
-          current_workers.emplace_back(new_variant, least_loaded);
-        }
-      }
-    }
-
     /**
      * Thus, if the strategy requires more resources than are available on the current worker (e.g., hardware accelerator), the worker coordinates with the controller to load the variant on a capable worker.
      */
@@ -113,7 +88,7 @@ public:
               {
                 if (a.first->get_throughput() != b.first->get_throughput())
                   return a.first->get_throughput() > b.first->get_throughput();
-                return a.second->get_free_memory() < b.second->get_free_memory();
+                return a.second->get_free_memory() > b.second->get_free_memory();
               });
 
     return current_workers.front();
